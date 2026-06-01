@@ -9,6 +9,8 @@
 
 本文件是两份设计的统一开发版。底层数据、索引、Shopify Admin API 和 Milvus 细节以 2026-05-29 版为基础；前台产品闭环、匿名状态、上传历史、错误处理、测试和验收标准吸收 2026-06-01 版内容。
 
+本文件是第一期最终主设计文档。`2026-06-01-image-search-phase-1-merged-design.md` 仅作为合并过程参考稿，不再作为实现依据。
+
 ## 1. 设计目标
 
 第一期交付一个可真实运行的 Shopify 店铺前台 Image Search 闭环，而不是后台 mock 或单页 demo。
@@ -101,6 +103,116 @@ Shopify Storefront
 - PostgreSQL 是业务真相源，保存商品展示数据、variant numeric id、索引状态、上传历史和收藏。
 - Milvus 只保存向量检索所需字段，不作为商品展示数据源。
 
+### 3.1 商品索引数据流
+
+```txt
+商家打开 /app
+  ↓
+点击 Index product images 或 Re-index product images
+  ↓
+Node 后端 authenticate.admin(request)
+  ↓
+创建 product_index_jobs 记录
+  ↓
+调用 Shopify Admin GraphQL API
+  ↓
+拉取 product、variant、media、currencyCode、legacyResourceId
+  ↓
+upsert PostgreSQL:
+  - shop_products
+  - shop_product_variants
+  - shop_product_images
+  ↓
+找出需要 embedding 的图片
+  ↓
+调用 FastAPI POST /embed/image
+  ↓
+校验 model、dimension、embedding.length、norm
+  ↓
+生成 stable vector_id
+  ↓
+写入 Milvus product_image_embeddings_512
+  ↓
+回写 shop_product_images.embedding_status
+  ↓
+更新 product_index_jobs 统计
+```
+
+第一版索引 API 可以同步执行小批量开发商品，便于本地验证和 Shopify app 后台操作。service/job 边界必须按异步任务设计：索引逻辑放在独立 service，API 只负责鉴权、创建 job、触发执行和返回 job summary；后续切换为队列或后台 worker 时不改变核心 service contract。
+
+### 3.2 前台 Image Search 数据流
+
+```txt
+用户点击右下角悬浮入口
+  ↓
+打开 Image Search modal
+  ↓
+用户上传图片
+  ↓
+前端显示 preview，并记录 recent upload
+  ↓
+前端 POST /api/image-search/search
+  ↓
+Node 后端校验 App Proxy signature/HMAC、shop、图片类型、图片大小
+  ↓
+调用 FastAPI POST /embed/image 生成 query embedding
+  ↓
+Milvus 按 shop_domain + available_for_sale + status 做粗过滤
+  ↓
+后端按 product 去重
+  ↓
+回查 PostgreSQL 做最终 availability/status filter 并拼商品卡片数据
+  ↓
+返回 results、favorites、recentUploads、queryMeta
+  ↓
+前台展示商品 grid
+```
+
+商品卡片行为：
+
+- 图片、标题、卡片主体点击跳转 `/products/{handle}`。
+- Add to Cart、Favorite、Find Similar 预留按钮必须阻止冒泡。
+- Add to Cart 调 Shopify Ajax Cart API `/cart/add.js`。
+- 成功后按钮显示 `Added`。
+- 不跳转、不关闭 modal、不清空结果。
+- 不打开购物车页。
+- 不可售商品显示 `Sold out` 或 `Unavailable`。
+
+### 3.3 PDP Similar Products 数据流
+
+```txt
+用户打开 Shopify 原生 PDP /products/{handle}
+  ↓
+Theme App Extension Product Block 加载
+  ↓
+前端请求 GET /api/recommendations/similar-products
+  ↓
+Node 后端根据 shop_domain + productGid 找当前商品
+  ↓
+优先找 featured image 对应 indexed vector
+  ↓
+如果没有，fallback 到第一张 indexed image
+  ↓
+如果仍没有，返回空 results
+  ↓
+通过 Milvus getVectorById(vector_id) 或等价查询读取 source embedding
+  ↓
+Milvus 检索相似图片，排除当前商品
+  ↓
+按 shopify_product_gid 去重
+  ↓
+回查 PostgreSQL 做最终过滤并拼商品卡片
+  ↓
+PDP 下方展示 Similar Products
+```
+
+PDP Similar Products 不能影响 PDP 主内容：
+
+- 请求失败时隐藏或显示轻量错误状态。
+- 无索引数据时隐藏或显示轻量空状态。
+- 推荐商品必须排除当前商品。
+- Add to Cart 和 Favorite 行为与 Image Search modal 商品卡片一致。
+
 ## 4. 关键统一决策
 
 ### 4.1 API 命名
@@ -113,7 +225,7 @@ GET  /api/recommendations/similar-products
 POST /api/image-search/index-products
 GET  /api/favorites
 POST /api/favorites
-DELETE /api/favorites
+POST /api/favorites/delete
 GET  /api/upload-history
 ```
 
@@ -146,7 +258,7 @@ openai/clip-vit-base-patch16
 clip-vit-b-16
 ```
 
-后端校验时同时记录底层模型和 alias，避免不同服务使用不同字符串导致误判。
+后端必须用底层模型名和维度做核心校验。`modelAlias` 只作为响应 metadata 和排查信息记录，不能因为 alias 缺失或短名差异让请求失败。
 
 ### 4.4 Milvus collection
 
@@ -170,18 +282,18 @@ Shopify Ajax Cart API `/cart/add.js` 使用 numeric variant id，不使用 Graph
 
 ### 4.6 收藏策略
 
-匿名用户第一期必须可收藏，前端 localStorage 是必做能力。后端 `favorite_products` 表和 API 同时支持 `anonymousId`，便于跨设备或登录合并扩展。
+匿名用户第一期必须可收藏，前端 localStorage 是必做能力。后端 `favorite_products` 表统一使用 `identity_type + identity_id` 表达匿名访客或登录 customer，避免 nullable `anonymous_id/customer_gid` 唯一约束在 Prisma 和 PostgreSQL 中产生歧义。
 
 如果第一期无法稳定获得 storefront customer identity：
 
 - UI 收藏仍完整工作。
 - localStorage 收藏必须可恢复。
-- 后端收藏 API 可只使用 `anonymousId`。
-- `customerGid` 合并逻辑延后，不影响第一期验收。
+- 后端收藏 API 使用 `identity_type=anonymous` 和 `identity_id=<anonymousId>`。
+- `identity_type=customer` 的合并逻辑延后，不影响第一期验收。
 
 ### 4.7 上传图片存储
 
-PostgreSQL 不存 full-size image binary。上传图片和缩略图使用对象存储接口：
+默认不保存 shopper full-size upload，只保存 thumbnail 和 metadata。原图保存作为可配置能力，只有打开 `UPLOAD_STORE_ORIGINALS=true` 时才把原图写入对象存储。
 
 - 本地开发：gitignored `storage/uploads`。
 - 生产：S3、Cloudflare R2、MinIO 或其他 S3-compatible object storage。
@@ -207,6 +319,7 @@ IMAGE_EMBEDDING_DIMENSION=512
 UPLOAD_STORAGE_PROVIDER=local
 UPLOAD_STORAGE_LOCAL_DIR=storage/uploads
 UPLOAD_STORAGE_PUBLIC_BASE_URL=
+UPLOAD_STORE_ORIGINALS=false
 
 UPLOAD_STORAGE_BUCKET=
 UPLOAD_STORAGE_ENDPOINT=
@@ -300,11 +413,12 @@ image=<file>
 
 ```txt
 model == IMAGE_EMBEDDING_MODEL
-modelAlias == IMAGE_EMBEDDING_MODEL_ALIAS
 dimension == 512
 embedding.length == 512
 embedding 已 L2 normalize，norm 接近 1
 ```
+
+`modelAlias` 只作为 metadata 记录。如果 embedding 服务未返回 alias，或 alias 与 `IMAGE_EMBEDDING_MODEL_ALIAS` 不一致，只记录 warning，不让 embedding 请求失败。真正决定向量兼容性的字段是 canonical `model` 和 `dimension`。
 
 ### 6.4 未来预留：`POST /embed/text`
 
@@ -546,8 +660,9 @@ id
 shop_domain
 anonymous_id
 customer_gid
-image_storage_key
+thumbnail_storage_key
 thumbnail_url
+original_image_storage_key
 original_filename
 content_type
 byte_size
@@ -567,18 +682,19 @@ failed
 - 成功上传并完成搜索后，保存 metadata 和 thumbnail。
 - 搜索失败时，前端仍保留本次预览；后端可保存 `failed` metadata 便于排查，但 recent uploads 默认只展示成功记录。
 - 不把图片 binary 存进 PostgreSQL。
+- 默认只保留 thumbnail；只有 `UPLOAD_STORE_ORIGINALS=true` 时才保存 shopper full-size original，并填充 `original_image_storage_key`。
 
 ### 7.6 `favorite_products`
 
-保存匿名或登录用户收藏。
+保存匿名或登录用户收藏。第一期用统一 identity 字段表示收藏归属，不使用 nullable `anonymous_id/customer_gid` 双字段作为唯一约束。
 
 字段：
 
 ```txt
 id
 shop_domain
-anonymous_id
-customer_gid
+identity_type
+identity_id
 shopify_product_gid
 shopify_variant_gid
 source_surface
@@ -586,14 +702,27 @@ created_at
 updated_at
 ```
 
+`identity_type`：
+
+```txt
+anonymous
+customer
+```
+
+`identity_id`：
+
+```txt
+anonymous: 使用 storefront script 生成的 anonymousId
+customer: 使用 Shopify customer GID
+```
+
 唯一约束：
 
 ```txt
-(shop_domain, anonymous_id, shopify_product_gid)
-(shop_domain, customer_gid, shopify_product_gid)
+(shop_domain, identity_type, identity_id, shopify_product_gid)
 ```
 
-如果 Prisma 对 nullable unique 的行为不能完全表达业务约束，service 层必须在写入前按 `shop_domain + identity + product` 做幂等 upsert。
+PostgreSQL 可用普通 composite unique index 表达该约束。若未来需要兼容 legacy nullable identity 字段，则必须用 partial unique index 或 service 层幂等 upsert 兜底，但第一期主 schema 不采用 nullable identity 字段。
 
 `source_surface`：
 
@@ -656,10 +785,10 @@ Milvus 主键，与 `shop_product_images.milvus_vector_id` 对应。
 稳定生成方式：
 
 ```txt
-sha256(shop_domain + "::" + shopify_media_gid + "::" + embedding_model + "::512")
+sha256(shop_domain + "::" + shopify_media_gid + "::" + canonical_embedding_model + "::" + embedding_dimension)
 ```
 
-这样 re-index 同一图片同一模型时可以覆盖或先 delete 再 insert，避免重复向量无限增长。
+其中 `canonical_embedding_model` 使用 `openai/clip-vit-base-patch16`，不使用 `modelAlias`。这样 re-index 同一图片同一模型同一维度时可以覆盖或先 delete 再 insert，避免重复向量无限增长；更换模型或维度时会自然生成不同 vector id，并要求写入新的 collection 或重新索引。
 
 ### 8.2 过滤要求
 
@@ -698,14 +827,14 @@ Milvus 返回 vector_id / shopify_product_gid / shopify_media_gid / score
   ↓
 后端按 shop_domain 回查 PostgreSQL
   ↓
-过滤 missing、inactive、stale records
+过滤 missing、inactive、stale records，并以 PostgreSQL availability/status 为最终真相
   ↓
 按商品去重
   ↓
 拼出 ProductCardDTO
 ```
 
-前台不直接访问 Milvus。
+Milvus 中的 `available_for_sale` 和 `status` 只用于粗过滤，减少候选量；最终是否可售、是否 active、默认 variant 选择和价格展示必须以 PostgreSQL 当前记录为准。前台不直接访问 Milvus。
 
 ## 9. Shopify Admin API 同步流程
 
@@ -930,6 +1059,13 @@ POST /api/image-search/index-products
 后台接口使用 authenticate.admin(request)
 ```
 
+执行方式：
+
+```txt
+第一版本地和小批量开发商品可以同步执行并返回 completed summary。
+service/job 边界按异步任务设计：后续迁移到队列或 worker 时，API contract 不需要重写。
+```
+
 输出：
 
 ```json
@@ -949,11 +1085,13 @@ POST /api/image-search/index-products
 
 ## 11. Storefront API 设计
 
-Theme App Extension 调用后端 API 时必须带当前店铺 domain 和 anonymous id。优先通过 Shopify App Proxy 暴露 storefront API，避免跨域和增强请求校验；本地 preview 或代理未配置时可使用 app URL + 限定 CORS。
+Theme App Extension 调用后端 API 时必须带当前店铺 domain 和 anonymous id。优先通过 Shopify App Proxy 暴露 storefront API，避免跨域并获得 Shopify 代理签名校验；本地 preview 或代理未配置时可使用 app URL + 限定 CORS。
 
 所有 storefront API 必须：
 
+- App Proxy 模式必须校验 Shopify proxy signature/HMAC，校验失败直接拒绝。
 - 校验 `shop` 是合法 myshopify domain。
+- 校验该 shop 已安装 app，且本地 session/store record 存在。
 - 强制按 `shop_domain` 过滤 PostgreSQL 和 Milvus。
 - 不信任前端传来的 product、variant、price、availability 数据。
 - 限制图片类型和大小。
@@ -1015,7 +1153,7 @@ sort 第一版只支持 most_relevant
 Flow：
 
 1. Validate shop、anonymousId、file type、file size。
-2. 保存上传 metadata 和 thumbnail，full-size image 写入 upload storage。
+2. 保存上传 metadata 和 thumbnail；默认不保存 full-size image。
 3. 调用 embedding 服务 `/embed/image`。
 4. 校验返回向量。
 5. 查询 Milvus，filter 包含 `shop_domain` 和可选 `available_for_sale == true`。
@@ -1025,6 +1163,8 @@ Flow：
 9. 按 `shopify_product_gid` 去重，保留 similarityScore 最高结果。
 10. 叠加 favorite state 和 recent uploads。
 11. 返回 ProductCardDTO 列表。
+
+如果 `UPLOAD_STORE_ORIGINALS=true`，后端可以把 full-size image 写入 upload storage，并在 `image_search_uploads.original_image_storage_key` 保存原图 key。默认关闭时，`original_image_storage_key` 为空。
 
 输出：
 
@@ -1072,11 +1212,12 @@ Flow：
 2. 优先找当前商品 featured image 对应的 indexed vector。
 3. 如果 featured image 未 indexed，fallback 到该商品第一张 indexed image。
 4. 如果当前商品没有 indexed image，返回空 results。
-5. 用 source vector 查询 Milvus。
-6. filter 包含 `shop_domain`、`shopify_product_gid != 当前商品` 和可选 `available_for_sale == true`。
-7. raw topK 使用 `max(limit * 3, 30)`。
-8. 按 product 去重。
-9. 回查 PostgreSQL 拼 ProductCardDTO。
+5. 使用 `milvus_vector_id` 通过 Milvus `getVectorById(vector_id)` 或等价 query 读取 source embedding。
+6. 用 source embedding 查询 Milvus。
+7. filter 包含 `shop_domain`、`shopify_product_gid != 当前商品` 和可选 `available_for_sale == true`。
+8. raw topK 使用 `max(limit * 3, 30)`。
+9. 按 product 去重。
+10. 回查 PostgreSQL 做最终 availability/status filter，并拼 ProductCardDTO。
 
 输出：
 
@@ -1095,15 +1236,15 @@ Flow：
 ```txt
 GET /api/favorites
 POST /api/favorites
-DELETE /api/favorites
+POST /api/favorites/delete
 ```
 
 `GET /api/favorites` 参数：
 
 ```txt
 shop
-anonymousId
-customerGid=<optional>
+identityType=anonymous|customer
+identityId=<anonymousId-or-customerGid>
 ```
 
 `POST /api/favorites` body：
@@ -1111,21 +1252,21 @@ customerGid=<optional>
 ```json
 {
   "shop": "example.myshopify.com",
-  "anonymousId": "uuid",
-  "customerGid": null,
+  "identityType": "anonymous",
+  "identityId": "uuid",
   "shopifyProductGid": "gid://shopify/Product/...",
   "shopifyVariantGid": "gid://shopify/ProductVariant/...",
   "sourceSurface": "image_search"
 }
 ```
 
-`DELETE /api/favorites` body：
+`POST /api/favorites/delete` body：
 
 ```json
 {
   "shop": "example.myshopify.com",
-  "anonymousId": "uuid",
-  "customerGid": null,
+  "identityType": "anonymous",
+  "identityId": "uuid",
   "shopifyProductGid": "gid://shopify/Product/..."
 }
 ```
@@ -1383,6 +1524,7 @@ error
 ## 14. 安全与隔离要求
 
 - Storefront API 必须校验 `shop` 格式，并确保该 shop 已安装 app 或有有效 session 记录。
+- App Proxy 请求必须校验 Shopify proxy signature/HMAC；本地 preview 直连 app URL 时必须使用限定 CORS，不允许开放任意 origin。
 - 所有 PostgreSQL 查询必须按 `shop_domain` 过滤。
 - 所有 Milvus 查询必须按 `shop_domain` 过滤。
 - 前端传来的 product、variant、price、availability 都不可信。
@@ -1425,6 +1567,7 @@ favorite_products
 (shop_domain, shopify_product_gid)
 (shop_domain, shopify_variant_gid)
 (shop_domain, shopify_media_gid)
+(shop_domain, identity_type, identity_id, shopify_product_gid)
 ```
 
 ### 15.3 Embedding 服务测试
@@ -1508,6 +1651,8 @@ POST /api/image-search/search
 - `similarityScore` 有值。
 - `availableOnly=true` 时不返回 unavailable 商品。
 - missing PostgreSQL records 被过滤。
+- 无效 App Proxy signature/HMAC 被拒绝。
+- 默认不保存 full-size upload，`original_image_storage_key` 为空。
 
 ### 15.7 Favorites 和 Upload History 测试
 
@@ -1515,8 +1660,9 @@ POST /api/image-search/search
 
 - 匿名收藏写入 localStorage。
 - 后端 `POST /api/favorites` 幂等。
-- `DELETE /api/favorites` 删除后再次删除仍成功返回 not favorited。
-- `GET /api/favorites` 按 shop 和 anonymousId 隔离。
+- `POST /api/favorites/delete` 删除后再次删除仍成功返回 not favorited。
+- `GET /api/favorites` 按 shop、identityType、identityId 隔离。
+- `favorite_products` 唯一约束为 `(shop_domain, identity_type, identity_id, shopify_product_gid)`。
 - 成功搜索后 `GET /api/upload-history` 返回 thumbnail。
 - 另一个 shop 看不到当前 shop 的收藏和上传历史。
 
@@ -1571,7 +1717,31 @@ POST /api/image-search/search
 13. 端到端验证和错误状态打磨。
 ```
 
-## 17. 验收标准
+## 17. 部署说明
+
+本地开发启动顺序：
+
+```txt
+1. PostgreSQL
+2. Milvus
+3. services/embedding FastAPI service
+4. Shopify React Router app
+5. Theme App Extension preview
+6. Product indexing job
+```
+
+生产部署：
+
+- Shopify app backend 和 FastAPI embedding service 分开部署。
+- `IMAGE_EMBEDDING_SERVICE_URL` 尽量使用内网地址。
+- 使用 managed PostgreSQL。
+- 使用 managed 或 self-hosted Milvus。
+- 使用 S3-compatible object storage 保存 thumbnails；只有 `UPLOAD_STORE_ORIGINALS=true` 时保存 shopper full-size uploads。
+- Milvus collection dimension 必须在索引前固定为 512。
+- 更换 embedding model 或 dimension 时必须新建 collection 并重新索引。
+- App Proxy routes 必须开启 signature/HMAC 校验，并拒绝未安装 shop。
+
+## 18. 验收标准
 
 第一期完成时必须满足：
 
@@ -1587,12 +1757,16 @@ POST /api/image-search/search
 - Add to Cart 通过 `/cart/add.js` 工作，不跳转、不关闭弹窗。
 - Add to Cart 使用 `shopify_variant_numeric_id`。
 - 收藏可切换并在匿名用户刷新后保留。
+- `favorite_products` 使用 `identity_type + identity_id` 做收藏归属和唯一约束。
+- 默认不保存 shopper full-size upload；上传历史可显示 thumbnail。
 - Product detail page 显示视觉相似 Similar Products。
 - Similar Products 不包含当前商品。
+- Similar Products 使用已索引图片的 `milvus_vector_id` 读取 source embedding，不在页面浏览时重新 embedding。
 - 错误、空状态、不可售状态都有受控 UI。
 - 所有 PostgreSQL 和 Milvus 操作按 `shop_domain` 隔离。
+- App Proxy storefront API 校验 Shopify signature/HMAC，并拒绝未安装 shop。
 
-## 18. 后续扩展边界
+## 19. 后续扩展边界
 
 第一期完成后可以按以下方向扩展：
 
