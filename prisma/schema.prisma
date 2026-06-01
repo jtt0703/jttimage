@@ -1,0 +1,169 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Session {
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
+model ShopProduct {
+  id                String               @id @default(uuid())
+  shopDomain        String               @map("shop_domain")
+  shopifyProductGid String               @map("shopify_product_gid")
+  title             String
+  handle            String
+  status            String
+  vendor            String?
+  productType       String?              @map("product_type")
+  tags              String[]             @default([])
+  featuredImageUrl  String?              @map("featured_image_url")
+  minPrice          Decimal?             @map("min_price") @db.Decimal(18, 2)
+  currencyCode      String?              @map("currency_code")
+  totalInventory    Int?                 @map("total_inventory")
+  availableForSale  Boolean              @default(false) @map("available_for_sale")
+  rawShopifyPayload Json                 @map("raw_shopify_payload")
+  lastSyncedAt      DateTime             @map("last_synced_at")
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
+  variants          ShopProductVariant[]
+  images            ShopProductImage[]
+
+  @@unique([shopDomain, shopifyProductGid])
+  @@index([shopDomain, handle])
+  @@map("shop_products")
+}
+
+model ShopProductVariant {
+  id                      String      @id @default(uuid())
+  productId               String      @map("product_id")
+  shopDomain              String      @map("shop_domain")
+  shopifyProductGid       String      @map("shopify_product_gid")
+  shopifyVariantGid       String      @map("shopify_variant_gid")
+  shopifyVariantNumericId String      @map("shopify_variant_numeric_id")
+  title                   String
+  sku                     String?
+  price                   Decimal?    @db.Decimal(18, 2)
+  compareAtPrice          Decimal?    @map("compare_at_price") @db.Decimal(18, 2)
+  availableForSale        Boolean     @default(false) @map("available_for_sale")
+  inventoryQuantity       Int?        @map("inventory_quantity")
+  rawShopifyPayload       Json        @map("raw_shopify_payload")
+  createdAt               DateTime    @default(now()) @map("created_at")
+  updatedAt               DateTime    @updatedAt @map("updated_at")
+  product                 ShopProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([shopDomain, shopifyVariantGid])
+  @@index([shopDomain, shopifyProductGid])
+  @@map("shop_product_variants")
+}
+
+model ShopProductImage {
+  id                  String      @id @default(uuid())
+  productId           String      @map("product_id")
+  shopDomain          String      @map("shop_domain")
+  shopifyProductGid   String      @map("shopify_product_gid")
+  shopifyMediaGid     String      @map("shopify_media_gid")
+  shopifyImageGid     String?     @map("shopify_image_gid")
+  imageUrl            String      @map("image_url")
+  altText             String?     @map("alt_text")
+  position            Int
+  width               Int?
+  height              Int?
+  isFeatured          Boolean     @default(false) @map("is_featured")
+  imageUrlHash        String      @map("image_url_hash")
+  embeddingStatus     String      @default("pending") @map("embedding_status")
+  embeddingProvider   String?     @map("embedding_provider")
+  embeddingModel      String?     @map("embedding_model")
+  embeddingModelAlias String?     @map("embedding_model_alias")
+  embeddingDimension  Int?        @map("embedding_dimension")
+  milvusCollection    String?     @map("milvus_collection")
+  milvusVectorId      String?     @map("milvus_vector_id")
+  lastEmbeddedAt      DateTime?   @map("last_embedded_at")
+  embeddingError      String?     @map("embedding_error")
+  createdAt           DateTime    @default(now()) @map("created_at")
+  updatedAt           DateTime    @updatedAt @map("updated_at")
+  product             ShopProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([shopDomain, shopifyMediaGid])
+  @@index([shopDomain, shopifyProductGid])
+  @@index([shopDomain, embeddingStatus])
+  @@index([milvusVectorId])
+  @@map("shop_product_images")
+}
+
+model ProductIndexJob {
+  id             String    @id @default(uuid())
+  shopDomain     String    @map("shop_domain")
+  status         String
+  mode           String
+  sourceFilter   Json      @map("source_filter")
+  productsSeen   Int       @default(0) @map("products_seen")
+  variantsSeen   Int       @default(0) @map("variants_seen")
+  imagesSeen     Int       @default(0) @map("images_seen")
+  imagesIndexed  Int       @default(0) @map("images_indexed")
+  imagesSkipped  Int       @default(0) @map("images_skipped")
+  imagesFailed   Int       @default(0) @map("images_failed")
+  errorMessage   String?   @map("error_message")
+  startedAt      DateTime? @map("started_at")
+  completedAt    DateTime? @map("completed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@index([shopDomain, createdAt])
+  @@map("product_index_jobs")
+}
+
+model ImageSearchUpload {
+  id                      String   @id @default(uuid())
+  shopDomain              String   @map("shop_domain")
+  anonymousId             String   @map("anonymous_id")
+  customerGid             String?  @map("customer_gid")
+  thumbnailStorageKey     String   @map("thumbnail_storage_key")
+  thumbnailUrl            String   @map("thumbnail_url")
+  originalImageStorageKey String?  @map("original_image_storage_key")
+  originalFilename        String?  @map("original_filename")
+  contentType             String   @map("content_type")
+  byteSize                Int      @map("byte_size")
+  searchStatus            String   @map("search_status")
+  createdAt               DateTime @default(now()) @map("created_at")
+
+  @@index([shopDomain, anonymousId, createdAt])
+  @@index([shopDomain, customerGid, createdAt])
+  @@map("image_search_uploads")
+}
+
+model FavoriteProduct {
+  id                String   @id @default(uuid())
+  shopDomain        String   @map("shop_domain")
+  identityType      String   @map("identity_type")
+  identityId        String   @map("identity_id")
+  shopifyProductGid String   @map("shopify_product_gid")
+  shopifyVariantGid String?  @map("shopify_variant_gid")
+  sourceSurface     String   @map("source_surface")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@unique([shopDomain, identityType, identityId, shopifyProductGid])
+  @@index([shopDomain, identityType, identityId])
+  @@map("favorite_products")
+}
