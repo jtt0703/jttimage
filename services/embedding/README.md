@@ -9,8 +9,18 @@ cd services/embedding
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -e '.[test]'
+pip install -e '.[download]'
+python -c "from modelscope import snapshot_download; print(snapshot_download('openai-mirror/clip-vit-base-patch16', cache_dir='/Users/apple/Desktop/test'))"
 uvicorn app.main:app --host 127.0.0.1 --port 8001
 ```
+
+The service loads the local ModelScope snapshot first when this directory exists:
+
+```txt
+/Users/apple/Desktop/test/openai-mirror/clip-vit-base-patch16
+```
+
+Override the local model directory with `IMAGE_EMBEDDING_MODEL_LOCAL_DIR`.
 
 ## Verify
 

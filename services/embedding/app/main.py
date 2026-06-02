@@ -1,6 +1,8 @@
 from functools import lru_cache
 from io import BytesIO
 import math
+import os
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -13,6 +15,7 @@ from transformers import CLIPModel, CLIPProcessor
 MODEL_NAME = "openai/clip-vit-base-patch16"
 MODEL_ALIAS = "clip-vit-b-16"
 DIMENSION = 512
+DEFAULT_LOCAL_MODEL_DIR = "/Users/apple/Desktop/test/openai-mirror/clip-vit-base-patch16"
 
 app = FastAPI(title="LensCart AI Embedding Service")
 
@@ -30,10 +33,18 @@ class EmbeddingResponse(BaseModel):
 
 @lru_cache(maxsize=1)
 def get_model_and_processor():
-    model = CLIPModel.from_pretrained(MODEL_NAME)
-    processor = CLIPProcessor.from_pretrained(MODEL_NAME)
+    model_source = resolve_model_source()
+    model = CLIPModel.from_pretrained(model_source)
+    processor = CLIPProcessor.from_pretrained(model_source)
     model.eval()
     return model, processor
+
+
+def resolve_model_source() -> str:
+    local_model_dir = os.environ.get("IMAGE_EMBEDDING_MODEL_LOCAL_DIR", DEFAULT_LOCAL_MODEL_DIR).strip()
+    if local_model_dir and Path(local_model_dir).exists():
+        return local_model_dir
+    return MODEL_NAME
 
 
 def load_image_from_bytes(data: bytes) -> Image.Image:

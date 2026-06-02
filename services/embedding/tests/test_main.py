@@ -3,7 +3,7 @@ from io import BytesIO
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app.main import app
+from app.main import MODEL_NAME, app, resolve_model_source
 
 
 def make_png_bytes() -> bytes:
@@ -23,6 +23,18 @@ def test_health_returns_model_metadata():
         "modelAlias": "clip-vit-b-16",
         "dimension": 512,
     }
+
+
+def test_resolve_model_source_prefers_existing_local_directory(monkeypatch, tmp_path):
+    monkeypatch.setenv("IMAGE_EMBEDDING_MODEL_LOCAL_DIR", str(tmp_path))
+
+    assert resolve_model_source() == str(tmp_path)
+
+
+def test_resolve_model_source_falls_back_to_model_name_for_missing_directory(monkeypatch, tmp_path):
+    monkeypatch.setenv("IMAGE_EMBEDDING_MODEL_LOCAL_DIR", str(tmp_path / "missing"))
+
+    assert resolve_model_source() == MODEL_NAME
 
 
 def test_embed_image_file_returns_normalized_512_vector(monkeypatch):
