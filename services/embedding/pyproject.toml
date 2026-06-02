@@ -1,0 +1,25 @@
+[project]
+name = "lens-cart-ai-embedding"
+version = "0.1.0"
+description = "CLIP image embedding service for LensCart AI"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.32.0",
+  "python-multipart>=0.0.12",
+  "pillow>=11.0.0",
+  "requests>=2.32.0",
+  "numpy<2",
+  "torch==2.2.2",
+  "transformers>=4.46.0,<5.0.0",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.3.0",
+  "httpx>=0.28.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
