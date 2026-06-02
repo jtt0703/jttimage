@@ -1,0 +1,53 @@
+{% if block.settings.enabled %}
+  {{ 'lens-cart-ai.css' | asset_url | stylesheet_tag }}
+  <script src="{{ 'lens-cart-ai-storefront.js' | asset_url }}" defer></script>
+
+  <div
+    id="lenscart-ai-root"
+    class="lenscart-ai-root"
+    data-shop-domain="{{ shop.permanent_domain | escape }}"
+    data-api-base-url="{{ block.settings.api_base_url | escape }}"
+  >
+    <button class="lenscart-ai-fab" type="button" data-lenscart-open>
+      <span aria-hidden="true">⌕</span>
+      <span class="lenscart-ai-sr-only">Open image search</span>
+    </button>
+
+    <div class="lenscart-ai-modal" data-lenscart-modal hidden>
+      <div class="lenscart-ai-backdrop" data-lenscart-close></div>
+      <section class="lenscart-ai-dialog" aria-label="Image Search">
+        <header class="lenscart-ai-header">
+          <h2>Image Search</h2>
+          <button type="button" data-lenscart-close>×</button>
+        </header>
+        <div class="lenscart-ai-body">
+          <aside class="lenscart-ai-left">
+            <div class="lenscart-ai-preview" data-lenscart-preview>Upload an image to search similar products.</div>
+            <label class="lenscart-ai-upload-button">
+              Upload New Image
+              <input type="file" accept="image/jpeg,image/png,image/webp" data-lenscart-file hidden>
+            </label>
+            <div class="lenscart-ai-recent" data-lenscart-recent></div>
+          </aside>
+          <main class="lenscart-ai-right">
+            <label class="lenscart-ai-filter"><input type="checkbox" data-lenscart-available-only checked> Available Products Only</label>
+            <div class="lenscart-ai-sort">Sort by: Most Relevant</div>
+            <div class="lenscart-ai-status" data-lenscart-status></div>
+            <div class="lenscart-ai-grid" data-lenscart-results></div>
+          </main>
+        </div>
+      </section>
+    </div>
+  </div>
+{% endif %}
+
+{% schema %}
+{
+  "name": "LensCart AI Image Search",
+  "target": "body",
+  "settings": [
+    { "type": "checkbox", "id": "enabled", "label": "Enable Image Search", "default": true },
+    { "type": "text", "id": "api_base_url", "label": "API base URL", "default": "/apps/lens-cart-ai" }
+  ]
+}
+{% endschema %}
