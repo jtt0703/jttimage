@@ -39,6 +39,16 @@
     return product.price && product.currencyCode ? `${product.currencyCode} ${product.price}` : "";
   }
 
+  async function readJsonResponse(response) {
+    const text = await response.text();
+    if (!text) return {};
+    try {
+      return JSON.parse(text);
+    } catch (_error) {
+      throw new Error("Something went wrong. Please try again.");
+    }
+  }
+
   async function addToCart(product, button, status) {
     if (!product.availableForSale || !product.variantId) return;
     button.textContent = "Adding…";
@@ -84,7 +94,7 @@
         if (isFavorited) favorites.delete(product.productGid); else favorites.add(product.productGid);
         writeJson(favoritesKey, Array.from(favorites));
         favorite.textContent = isFavorited ? "♡" : "♥";
-        const path = isFavorited ? "/api/favorites/delete" : "/api/favorites";
+        const path = isFavorited ? "/favorites/delete" : "/favorites";
         try {
           await fetch(`${apiBaseUrl}${path}`, {
             method: "POST",
@@ -192,11 +202,12 @@
       form.append("sort", "most_relevant");
 
       try {
-        const response = await fetch(`${apiBaseUrl}/api/image-search/search`, { method: "POST", body: form });
-        const body = await response.json();
+        const response = await fetch(`${apiBaseUrl}/image-search/search`, { method: "POST", body: form });
+        const body = await readJsonResponse(response);
         if (!response.ok) throw new Error(body.error || "Something went wrong. Please try again.");
-        status.textContent = body.results.length ? "" : "No similar products found.";
-        renderProducts(results, body.results, status, shop, apiBaseUrl, "image_search");
+        const searchResults = Array.isArray(body.results) ? body.results : [];
+        status.textContent = searchResults.length ? "" : "No similar products found.";
+        renderProducts(results, searchResults, status, shop, apiBaseUrl, "image_search");
         renderRecent(body.recentUploads || []);
         writeJson(keys.favorites(shop), body.favorites || readJson(keys.favorites(shop), []));
       } catch (error) {
@@ -214,15 +225,16 @@
     const results = section.querySelector("[data-lenscart-similar-results]");
     try {
       const params = new URLSearchParams({ shop, productGid, anonymousId: getAnonymousId(), limit, availableOnly: "true" });
-      const response = await fetch(`${apiBaseUrl}/api/recommendations/similar-products?${params}`);
-      const body = await response.json();
+      const response = await fetch(`${apiBaseUrl}/recommendations/similar-products?${params}`);
+      const body = await readJsonResponse(response);
       if (!response.ok) throw new Error(body.error || "Similar products unavailable.");
-      if (!body.results.length) {
+      const similarResults = Array.isArray(body.results) ? body.results : [];
+      if (!similarResults.length) {
         section.hidden = true;
         return;
       }
       status.textContent = "";
-      renderProducts(results, body.results, status, shop, apiBaseUrl, "pdp_similar_products");
+      renderProducts(results, similarResults, status, shop, apiBaseUrl, "pdp_similar_products");
     } catch (_error) {
       status.textContent = "Similar products unavailable.";
     }

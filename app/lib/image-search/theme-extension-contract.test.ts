@@ -4,6 +4,10 @@ import { describe, expect, it } from "vitest";
 
 const extensionRoot = join(process.cwd(), "extensions/lens-cart-ai-theme");
 
+function readProjectFile(relativePath: string): string {
+  return readFileSync(join(process.cwd(), relativePath), "utf8");
+}
+
 function readExtensionFile(relativePath: string): string {
   return readFileSync(join(extensionRoot, relativePath), "utf8");
 }
@@ -14,6 +18,16 @@ describe("LensCart AI theme extension contract", () => {
 
     expect(toml).toContain('name = "LensCart AI Storefront"');
     expect(toml).toContain('type = "theme"');
+  });
+
+  it("configures the Shopify app proxy for storefront API calls", () => {
+    const toml = readProjectFile("shopify.app.toml");
+
+    expect(toml).toContain("write_app_proxy");
+    expect(toml).toContain("[app_proxy]");
+    expect(toml).toContain('url = "/api"');
+    expect(toml).toContain('prefix = "apps"');
+    expect(toml).toContain('subpath = "lens-cart-ai"');
   });
 
   it("defines the image search app embed hooks and settings", () => {
@@ -50,10 +64,20 @@ describe("LensCart AI theme extension contract", () => {
     expect(js).toContain("lensCartAi.v1.anonymousId");
     expect(js).toContain("lensCartAi.v1.recentUploads.");
     expect(js).toContain("lensCartAi.v1.favoriteProducts.");
-    expect(js).toContain("/api/image-search/search");
-    expect(js).toContain("/api/recommendations/similar-products");
-    expect(js).toContain("/api/favorites/delete");
-    expect(js).toContain("/api/favorites");
+    expect(js).toContain("${apiBaseUrl}/image-search/search");
+    expect(js).toContain("${apiBaseUrl}/recommendations/similar-products");
+    expect(js).toContain('const path = isFavorited ? "/favorites/delete" : "/favorites";');
+    expect(js).toContain("${apiBaseUrl}${path}");
+    expect(js).not.toContain("${apiBaseUrl}/api/");
+  });
+
+  it("does not surface raw JSON parse errors for empty proxy responses", () => {
+    const js = readExtensionFile("assets/lens-cart-ai-storefront.js");
+
+    expect(js).toContain("async function readJsonResponse(response)");
+    expect(js).toContain("await response.text()");
+    expect(js).toContain("Something went wrong. Please try again.");
+    expect(js).not.toContain("await response.json()");
   });
 
   it("uses Shopify Ajax Cart with the numeric variant id and prevents button navigation", () => {
