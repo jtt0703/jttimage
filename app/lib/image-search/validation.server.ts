@@ -4,6 +4,7 @@ import type { IdentityType } from "./types";
 const SHOP_DOMAIN_RE = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CUSTOMER_GID_RE = /^gid:\/\/shopify\/Customer\/\d+$/;
+const PRODUCT_GID_RE = /^gid:\/\/shopify\/Product\/\d+$/;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
@@ -42,6 +43,13 @@ export function validateIdentity(input: { identityType?: string | null; identity
   }
 
   throw new Error("Invalid identity");
+}
+
+export function validateShopifyProductGid(productGid: string | null | undefined): string {
+  if (!productGid || !PRODUCT_GID_RE.test(productGid)) {
+    throw new Error("Invalid productGid");
+  }
+  return productGid;
 }
 
 export function assertAllowedImageUpload(input: { contentType: string; byteSize: number }): void {

@@ -4,6 +4,7 @@ import {
   normalizeLimit,
   parseBooleanParam,
   validateIdentity,
+  validateShopifyProductGid,
   validateShopDomain,
 } from "./validation.server";
 
@@ -34,6 +35,16 @@ describe("image search validation", () => {
     expect(
       validateIdentity({ identityType: "anonymous", identityId: "9f4030f7-8528-4e44-badf-6a8fd59ca7c9" }),
     ).toEqual({ identityType: "anonymous", identityId: "9f4030f7-8528-4e44-badf-6a8fd59ca7c9" });
+  });
+
+  it("validates Shopify product GIDs", () => {
+    expect(validateShopifyProductGid("gid://shopify/Product/10413865763091")).toBe(
+      "gid://shopify/Product/10413865763091",
+    );
+    expect(() => validateShopifyProductGid("")).toThrow("Invalid productGid");
+    expect(() => validateShopifyProductGid("gid://shopify/ProductVariant/54228824490259")).toThrow(
+      "Invalid productGid",
+    );
   });
 
   it("rejects unsupported image uploads", () => {
