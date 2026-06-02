@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from PIL import Image
 import requests
@@ -95,14 +95,16 @@ def health():
 
 
 @app.post("/embed/image", response_model=EmbeddingResponse)
-async def embed_image_endpoint(payload: Optional[ImageUrlRequest] = None, image: UploadFile | None = File(default=None)):
+async def embed_image_endpoint(request: Request, image: UploadFile | None = File(default=None)):
     if image is not None:
         image_bytes = await image.read()
         pil_image = load_image_from_bytes(image_bytes)
-    elif payload is not None and payload.imageUrl:
-        pil_image = load_image_from_url(payload.imageUrl)
     else:
-        raise HTTPException(status_code=400, detail="Provide imageUrl or multipart image file")
+        payload = await read_json_payload(request)
+        if payload.imageUrl:
+            pil_image = load_image_from_url(payload.imageUrl)
+        else:
+            raise HTTPException(status_code=400, detail="Provide imageUrl or multipart image file")
 
     return EmbeddingResponse(
         model=MODEL_NAME,
@@ -110,3 +112,13 @@ async def embed_image_endpoint(payload: Optional[ImageUrlRequest] = None, image:
         dimension=DIMENSION,
         embedding=embed_image(pil_image),
     )
+
+
+async def read_json_payload(request: Request) -> ImageUrlRequest:
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    return ImageUrlRequest(**body)

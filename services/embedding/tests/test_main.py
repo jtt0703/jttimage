@@ -57,6 +57,28 @@ def test_embed_image_file_returns_normalized_512_vector(monkeypatch):
     assert sum(value * value for value in body["embedding"]) == 1.0
 
 
+def test_embed_image_url_json_returns_normalized_512_vector(monkeypatch):
+    def fake_load_image_from_url(image_url):
+        assert image_url == "https://cdn.shopify.com/product.jpg"
+        return Image.new("RGB", (8, 8), color=(0, 255, 0))
+
+    def fake_embed_image(image):
+        return [1.0] + [0.0] * 511
+
+    monkeypatch.setattr("app.main.load_image_from_url", fake_load_image_from_url)
+    monkeypatch.setattr("app.main.embed_image", fake_embed_image)
+    client = TestClient(app)
+    response = client.post("/embed/image", json={"imageUrl": "https://cdn.shopify.com/product.jpg"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["model"] == "openai/clip-vit-base-patch16"
+    assert body["modelAlias"] == "clip-vit-b-16"
+    assert body["dimension"] == 512
+    assert len(body["embedding"]) == 512
+    assert sum(value * value for value in body["embedding"]) == 1.0
+
+
 def test_embed_image_rejects_empty_request():
     client = TestClient(app)
     response = client.post("/embed/image", json={})
