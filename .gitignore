@@ -39,3 +39,4 @@ services/embedding/__pycache__
 services/embedding/.pytest_cache
 services/embedding/app/__pycache__
 services/embedding/tests/__pycache__
+services/embedding/*.egg-info
