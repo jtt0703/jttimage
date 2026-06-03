@@ -39,6 +39,12 @@
     return product.price && product.currencyCode ? `${product.currencyCode} ${product.price}` : "";
   }
 
+  function storefrontAssetUrl(url, apiBaseUrl) {
+    if (!url) return "";
+    if (url.startsWith("/storage/uploads/")) return `${apiBaseUrl}${url}`;
+    return url;
+  }
+
   async function readJsonResponse(response) {
     const text = await response.text();
     if (!text) return {};
@@ -164,7 +170,7 @@
       recent.innerHTML = "";
       items.forEach((item) => {
         const img = document.createElement("img");
-        img.src = item.thumbnailUrl;
+        img.src = storefrontAssetUrl(item.thumbnailUrl, apiBaseUrl);
         img.alt = "Recent upload";
         recent.appendChild(img);
       });

@@ -71,6 +71,15 @@ describe("LensCart AI theme extension contract", () => {
     expect(js).not.toContain("${apiBaseUrl}/api/");
   });
 
+  it("loads local upload thumbnails through the storefront app proxy", () => {
+    const js = readExtensionFile("assets/lens-cart-ai-storefront.js");
+
+    expect(js).toContain("function storefrontAssetUrl(url, apiBaseUrl)");
+    expect(js).toContain('url.startsWith("/storage/uploads/")');
+    expect(js).toContain("`${apiBaseUrl}${url}`");
+    expect(js).toContain("storefrontAssetUrl(item.thumbnailUrl, apiBaseUrl)");
+  });
+
   it("does not surface raw JSON parse errors for empty proxy responses", () => {
     const js = readExtensionFile("assets/lens-cart-ai-storefront.js");
 
