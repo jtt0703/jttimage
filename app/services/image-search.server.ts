@@ -10,6 +10,76 @@ import { createDefaultMilvusVectorStore } from "./milvus-client.server";
 import { saveLocalThumbnail } from "./upload-storage.server";
 import { createUploadHistory, listRecentUploads } from "./upload-history.server";
 
+interface ProductCategoryInput {
+  title: string;
+  productType?: string | null;
+  tags?: string[] | null;
+}
+
+const SEARCH_CATEGORY_KEYWORDS: Array<{ category: string; keywords: string[] }> = [
+  {
+    category: "outerwear",
+    keywords: ["coat", "jacket", "blazer", "parka", "trench", "overcoat", "cardigan", "vest"],
+  },
+  {
+    category: "shoes",
+    keywords: ["shoe", "shoes", "sneaker", "sneakers", "boot", "boots", "sandal", "heel", "loafer"],
+  },
+  {
+    category: "bags",
+    keywords: ["bag", "bags", "tote", "handbag", "purse", "backpack", "clutch", "satchel"],
+  },
+  {
+    category: "eyewear",
+    keywords: ["sunglasses", "glasses", "eyewear", "aviator", "frames"],
+  },
+  {
+    category: "dresses",
+    keywords: ["dress", "dresses", "skirt", "gown"],
+  },
+  {
+    category: "tops",
+    keywords: ["shirt", "blouse", "top", "tee", "t-shirt", "sweater", "hoodie", "pullover"],
+  },
+  {
+    category: "bottoms",
+    keywords: ["pants", "jeans", "trouser", "trousers", "shorts", "leggings"],
+  },
+];
+
+function productSearchText(product: ProductCategoryInput): string {
+  return [product.productType, product.title, ...(product.tags ?? [])].filter(Boolean).join(" ").toLowerCase();
+}
+
+export function inferProductSearchCategory(product: ProductCategoryInput): string | null {
+  const text = productSearchText(product);
+  for (const group of SEARCH_CATEGORY_KEYWORDS) {
+    if (group.keywords.some((keyword) => text.includes(keyword))) return group.category;
+  }
+  return null;
+}
+
+export function filterHitsByDominantProductCategory(
+  hits: MilvusSearchHit[],
+  productsByGid: Map<string, ProductCategoryInput>,
+  anchorProduct?: ProductCategoryInput | null,
+): MilvusSearchHit[] {
+  const anchorCategory =
+    (anchorProduct ? inferProductSearchCategory(anchorProduct) : null) ??
+    hits
+      .map((hit) => productsByGid.get(hit.shopifyProductGid))
+      .filter((product): product is ProductCategoryInput => Boolean(product))
+      .map(inferProductSearchCategory)
+      .find((category): category is string => Boolean(category));
+
+  if (!anchorCategory) return hits;
+
+  return hits.filter((hit) => {
+    const product = productsByGid.get(hit.shopifyProductGid);
+    return product ? inferProductSearchCategory(product) === anchorCategory : false;
+  });
+}
+
 export function dedupeHitsByProduct(
   hits: MilvusSearchHit[],
   options: { minScore?: number; limit?: number } = {},
@@ -58,13 +128,10 @@ export async function runImageSearch(input: {
       limit: Math.max(input.limit * 3, 36),
       availableOnly: input.availableOnly,
     });
-    const hits = dedupeHitsByProduct(rawHits, {
+    const candidateHits = dedupeHitsByProduct(rawHits, {
       minScore: config.imageSearchMinSimilarityScore,
-      limit: input.limit,
     });
-    const productGids = hits.map((hit) => hit.shopifyProductGid);
-    const mediaGidsByProduct = new Map(hits.map((hit) => [hit.shopifyProductGid, hit.shopifyMediaGid]));
-    const scoreByProduct = new Map(hits.map((hit) => [hit.shopifyProductGid, hit.score]));
+    const candidateProductGids = candidateHits.map((hit) => hit.shopifyProductGid);
     const favoriteGids = await listFavoriteProductGids({
       prisma: input.prisma,
       shopDomain: input.shopDomain,
@@ -76,7 +143,7 @@ export async function runImageSearch(input: {
     const products = await input.prisma.shopProduct.findMany({
       where: {
         shopDomain: input.shopDomain,
-        shopifyProductGid: { in: productGids },
+        shopifyProductGid: { in: candidateProductGids },
         status: "ACTIVE",
         ...(input.availableOnly ? { availableForSale: true } : {}),
       },
@@ -84,6 +151,9 @@ export async function runImageSearch(input: {
     });
 
     const productByGid = new Map(products.map((product) => [product.shopifyProductGid, product]));
+    const hits = filterHitsByDominantProductCategory(candidateHits, productByGid).slice(0, input.limit);
+    const mediaGidsByProduct = new Map(hits.map((hit) => [hit.shopifyProductGid, hit.shopifyMediaGid]));
+    const scoreByProduct = new Map(hits.map((hit) => [hit.shopifyProductGid, hit.score]));
     const results = hits
       .map((hit) => {
         const product = productByGid.get(hit.shopifyProductGid);

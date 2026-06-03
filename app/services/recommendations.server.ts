@@ -2,7 +2,7 @@ import type { PrismaClient, ShopProductImage } from "@prisma/client";
 import { getImageSearchConfig } from "../lib/image-search/env.server";
 import { buildProductCardDTO } from "../lib/image-search/product-card.server";
 import { listFavoriteProductGids } from "./favorites.server";
-import { dedupeHitsByProduct } from "./image-search.server";
+import { dedupeHitsByProduct, filterHitsByDominantProductCategory } from "./image-search.server";
 import { createDefaultMilvusVectorStore } from "./milvus-client.server";
 
 export function selectSourceIndexedImage<
@@ -45,7 +45,7 @@ export async function getSimilarProducts(input: {
     availableOnly: input.availableOnly,
     excludeProductGid: input.productGid,
   });
-  const hits = dedupeHitsByProduct(rawHits).slice(0, input.limit);
+  const candidateHits = dedupeHitsByProduct(rawHits);
   const favoriteGids = input.anonymousId
     ? await listFavoriteProductGids({
         prisma: input.prisma,
@@ -58,13 +58,14 @@ export async function getSimilarProducts(input: {
   const products = await input.prisma.shopProduct.findMany({
     where: {
       shopDomain: input.shopDomain,
-      shopifyProductGid: { in: hits.map((hit) => hit.shopifyProductGid) },
+      shopifyProductGid: { in: candidateHits.map((hit) => hit.shopifyProductGid) },
       status: "ACTIVE",
       ...(input.availableOnly ? { availableForSale: true } : {}),
     },
     include: { variants: true, images: true },
   });
   const productByGid = new Map(products.map((row) => [row.shopifyProductGid, row]));
+  const hits = filterHitsByDominantProductCategory(candidateHits, productByGid, product).slice(0, input.limit);
   const results = hits
     .map((hit) => {
       const row = productByGid.get(hit.shopifyProductGid);
