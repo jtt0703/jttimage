@@ -50,6 +50,7 @@ export interface ImageSearchConfig {
   embeddingModel: string;
   embeddingModelAlias: string;
   embeddingDimension: number;
+  imageSearchMinSimilarityScore: number;
   uploadStorageProvider: "local" | "s3";
   uploadStorageLocalDir: string;
   uploadStoragePublicBaseUrl: string;

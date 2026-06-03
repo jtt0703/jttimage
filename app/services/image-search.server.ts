@@ -10,15 +10,20 @@ import { createDefaultMilvusVectorStore } from "./milvus-client.server";
 import { saveLocalThumbnail } from "./upload-storage.server";
 import { createUploadHistory, listRecentUploads } from "./upload-history.server";
 
-export function dedupeHitsByProduct(hits: MilvusSearchHit[]): MilvusSearchHit[] {
+export function dedupeHitsByProduct(
+  hits: MilvusSearchHit[],
+  options: { minScore?: number; limit?: number } = {},
+): MilvusSearchHit[] {
   const bestByProduct = new Map<string, MilvusSearchHit>();
   for (const hit of hits) {
+    if (options.minScore !== undefined && hit.score < options.minScore) continue;
     const existing = bestByProduct.get(hit.shopifyProductGid);
     if (!existing || hit.score > existing.score) {
       bestByProduct.set(hit.shopifyProductGid, hit);
     }
   }
-  return [...bestByProduct.values()].sort((a, b) => b.score - a.score);
+  const deduped = [...bestByProduct.values()].sort((a, b) => b.score - a.score);
+  return options.limit === undefined ? deduped : deduped.slice(0, options.limit);
 }
 
 export async function runImageSearch(input: {
@@ -53,7 +58,10 @@ export async function runImageSearch(input: {
       limit: Math.max(input.limit * 3, 36),
       availableOnly: input.availableOnly,
     });
-    const hits = dedupeHitsByProduct(rawHits).slice(0, input.limit);
+    const hits = dedupeHitsByProduct(rawHits, {
+      minScore: config.imageSearchMinSimilarityScore,
+      limit: input.limit,
+    });
     const productGids = hits.map((hit) => hit.shopifyProductGid);
     const mediaGidsByProduct = new Map(hits.map((hit) => [hit.shopifyProductGid, hit.shopifyMediaGid]));
     const scoreByProduct = new Map(hits.map((hit) => [hit.shopifyProductGid, hit.score]));

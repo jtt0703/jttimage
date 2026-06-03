@@ -11,6 +11,13 @@ function intEnv(name: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function floatEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseFloat(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 function boolEnv(name: string, fallback: boolean): boolean {
   const raw = process.env[name];
   if (!raw) return fallback;
@@ -33,6 +40,7 @@ export function getImageSearchConfig(): ImageSearchConfig {
     embeddingModel: stringEnv("IMAGE_EMBEDDING_MODEL", "openai/clip-vit-base-patch16"),
     embeddingModelAlias: stringEnv("IMAGE_EMBEDDING_MODEL_ALIAS", "clip-vit-b-16"),
     embeddingDimension: intEnv("IMAGE_EMBEDDING_DIMENSION", 512),
+    imageSearchMinSimilarityScore: floatEnv("IMAGE_SEARCH_MIN_SIMILARITY_SCORE", 0.25),
     uploadStorageProvider,
     uploadStorageLocalDir: stringEnv("UPLOAD_STORAGE_LOCAL_DIR", "storage/uploads"),
     uploadStoragePublicBaseUrl: stringEnv("UPLOAD_STORAGE_PUBLIC_BASE_URL", ""),
