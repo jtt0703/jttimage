@@ -95,8 +95,36 @@ describe("LensCart AI theme extension contract", () => {
     expect(js).toContain("/cart/add.js");
     expect(js).toContain("id: product.variantId");
     expect(js).toContain("quantity: 1");
+    expect(js).toContain('cartLink.href = "/cart"');
+    expect(js).toContain('cartLink.textContent = "View cart"');
     expect(js).toContain("event.stopPropagation()");
     expect(js).toContain('window.location.href = `/products/${product.handle}`');
+  });
+
+  it("lets shoppers rerun searches from recent uploads", () => {
+    const js = readExtensionFile("assets/lens-cart-ai-storefront.js");
+
+    expect(js).toContain("async function searchRecentUpload(item)");
+    expect(js).toContain("await fetch(storefrontAssetUrl(item.thumbnailUrl, apiBaseUrl))");
+    expect(js).toContain('new File([blob], "recent-upload.webp"');
+    expect(js).toContain("button.addEventListener(\"click\", () => searchRecentUpload(item))");
+  });
+
+  it("wires Find Similar buttons to the similar-products API", () => {
+    const js = readExtensionFile("assets/lens-cart-ai-storefront.js");
+
+    expect(js).toContain("async function findSimilarProducts(product)");
+    expect(js).toContain("productGid: product.productGid");
+    expect(js).toContain("${apiBaseUrl}/recommendations/similar-products?${params}");
+    expect(js).toContain("findSimilarProducts(product)");
+    expect(js).not.toContain('similar.addEventListener("click", (event) => event.stopPropagation())');
+  });
+
+  it("gives storefront feedback for favorite actions", () => {
+    const js = readExtensionFile("assets/lens-cart-ai-storefront.js");
+
+    expect(js).toContain('"Saved to favorites. Favorites are marked with a filled heart in Image Search."');
+    expect(js).toContain('"Removed from favorites."');
   });
 
   it("ships CSS for the modal, cards, favorite button, and PDP block", () => {
