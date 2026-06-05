@@ -1,11 +1,25 @@
 import { describe, expect, it, vi } from "vitest";
+import type { PrismaClient } from "@prisma/client";
 import { addFavorite, deleteFavorite, listFavoriteProductGids } from "./favorites.server";
 
-function fakePrisma() {
-  const rows: any[] = [];
+type FavoriteRow = {
+  shopDomain: string;
+  identityType: string;
+  identityId: string;
+  shopifyProductGid: string;
+  shopifyVariantGid?: string | null;
+  sourceSurface?: string;
+};
+
+type FavoriteWhere = Pick<FavoriteRow, "shopDomain" | "identityType" | "identityId"> & {
+  shopifyProductGid?: string;
+};
+
+function fakePrisma(): PrismaClient {
+  const rows: FavoriteRow[] = [];
   return {
     favoriteProduct: {
-      findMany: vi.fn(async ({ where }: any) =>
+      findMany: vi.fn(async ({ where }: { where: FavoriteWhere }) =>
         rows.filter(
           (row) =>
             row.shopDomain === where.shopDomain &&
@@ -13,7 +27,7 @@ function fakePrisma() {
             row.identityId === where.identityId,
         ),
       ),
-      upsert: vi.fn(async ({ create }: any) => {
+      upsert: vi.fn(async ({ create }: { create: FavoriteRow }) => {
         const existing = rows.find(
           (row) =>
             row.shopDomain === create.shopDomain &&
@@ -25,7 +39,7 @@ function fakePrisma() {
         rows.push(create);
         return create;
       }),
-      deleteMany: vi.fn(async ({ where }: any) => {
+      deleteMany: vi.fn(async ({ where }: { where: FavoriteWhere }) => {
         const before = rows.length;
         for (let index = rows.length - 1; index >= 0; index -= 1) {
           const row = rows[index];
@@ -40,7 +54,7 @@ function fakePrisma() {
         return { count: before - rows.length };
       }),
     },
-  } as any;
+  } as unknown as PrismaClient;
 }
 
 describe("favorites service", () => {

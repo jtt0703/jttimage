@@ -1,5 +1,7 @@
 import { createRequire } from "node:module";
+import { createShopMilvusCollectionName } from "../lib/image-search/hash.server";
 import type { MilvusSearchHit } from "../lib/image-search/types";
+import { errorLogFields, logger } from "../lib/logger.server";
 
 interface MilvusSdkLike {
   hasCollection(input: { collection_name: string }): Promise<{ value: boolean }>;
@@ -37,9 +39,13 @@ export function createMilvusVectorStore(input: { client: MilvusSdkLike; collecti
   const { client, collectionName, dimension } = input;
 
   return {
+    collectionName,
+
     async ensureCollection(): Promise<void> {
+      const startedAtMs = performance.now();
       const exists = await client.hasCollection({ collection_name: collectionName });
       if (!exists.value) {
+        logger.info({ event: "milvus.collection_created", collectionName, dimension }, "creating milvus collection");
         await client.createCollection({
           collection_name: collectionName,
           fields: [
@@ -65,32 +71,79 @@ export function createMilvusVectorStore(input: { client: MilvusSdkLike; collecti
         });
       }
       await client.loadCollectionSync({ collection_name: collectionName });
+      logger.info(
+        {
+          event: "milvus.collection_loaded",
+          collectionName,
+          collectionCreated: !exists.value,
+          durationMs: Math.round(performance.now() - startedAtMs),
+        },
+        "milvus collection loaded",
+      );
     },
 
     async upsertProductImageVector(vector: ProductImageVectorInput): Promise<void> {
-      await this.ensureCollection();
-      await client.delete({
-        collection_name: collectionName,
-        filter: `vector_id == "${escapeMilvusString(vector.vectorId)}"`,
-      });
-      await client.insert({
-        collection_name: collectionName,
-        data: [
+      const startedAtMs = performance.now();
+      logger.info(
+        {
+          event: "milvus.upsert_started",
+          collectionName,
+          shopDomain: vector.shopDomain,
+          vectorId: vector.vectorId,
+          shopifyProductGid: vector.shopifyProductGid,
+          shopifyMediaGid: vector.shopifyMediaGid,
+        },
+        "milvus vector upsert started",
+      );
+      try {
+        await this.ensureCollection();
+        await client.delete({
+          collection_name: collectionName,
+          filter: `vector_id == "${escapeMilvusString(vector.vectorId)}"`,
+        });
+        await client.insert({
+          collection_name: collectionName,
+          data: [
+            {
+              vector_id: vector.vectorId,
+              embedding: vector.embedding,
+              shop_domain: vector.shopDomain,
+              shopify_product_gid: vector.shopifyProductGid,
+              shopify_media_gid: vector.shopifyMediaGid,
+              shopify_variant_gid: vector.shopifyVariantGid ?? "",
+              available_for_sale: vector.availableForSale,
+              product_type: vector.productType ?? "",
+              status: vector.status,
+              created_at_unix: Math.floor(Date.now() / 1000),
+            },
+          ],
+        });
+        await client.flushSync({ collection_names: [collectionName] });
+        logger.info(
           {
-            vector_id: vector.vectorId,
-            embedding: vector.embedding,
-            shop_domain: vector.shopDomain,
-            shopify_product_gid: vector.shopifyProductGid,
-            shopify_media_gid: vector.shopifyMediaGid,
-            shopify_variant_gid: vector.shopifyVariantGid ?? "",
-            available_for_sale: vector.availableForSale,
-            product_type: vector.productType ?? "",
-            status: vector.status,
-            created_at_unix: Math.floor(Date.now() / 1000),
+            event: "milvus.upsert_completed",
+            collectionName,
+            shopDomain: vector.shopDomain,
+            vectorId: vector.vectorId,
+            durationMs: Math.round(performance.now() - startedAtMs),
           },
-        ],
-      });
-      await client.flushSync({ collection_names: [collectionName] });
+          "milvus vector upsert completed",
+        );
+      } catch (error) {
+        logger.error(
+          {
+            event: "milvus.error",
+            operation: "upsert",
+            collectionName,
+            shopDomain: vector.shopDomain,
+            vectorId: vector.vectorId,
+            durationMs: Math.round(performance.now() - startedAtMs),
+            ...errorLogFields(error),
+          },
+          "milvus vector upsert failed",
+        );
+        throw error;
+      }
     },
 
     async search(input: {
@@ -100,32 +153,64 @@ export function createMilvusVectorStore(input: { client: MilvusSdkLike; collecti
       availableOnly: boolean;
       excludeProductGid?: string;
     }): Promise<MilvusSearchHit[]> {
+      const startedAtMs = performance.now();
       const filters = [shopFilter(input.shopDomain)];
       if (input.availableOnly) filters.push("available_for_sale == true");
       if (input.excludeProductGid) filters.push(`shopify_product_gid != "${escapeMilvusString(input.excludeProductGid)}"`);
+      const filter = filters.join(" && ");
 
-      const response = await client.search({
-        collection_name: collectionName,
-        vector: input.embedding,
-        anns_field: "embedding",
-        metric_type: "IP",
-        limit: input.limit,
-        filter: filters.join(" && "),
-        output_fields: ["vector_id", "shopify_product_gid", "shopify_media_gid"],
-      });
+      try {
+        await this.ensureCollection();
+        const response = await client.search({
+          collection_name: collectionName,
+          vector: input.embedding,
+          anns_field: "embedding",
+          metric_type: "IP",
+          limit: input.limit,
+          filter,
+          output_fields: ["vector_id", "shopify_product_gid", "shopify_media_gid"],
+        });
 
-      return (response.results ?? []).map((hit) => {
-        const row = hit as Record<string, unknown>;
-        return {
-          vectorId: String(row.vector_id),
-          shopifyProductGid: String(row.shopify_product_gid),
-          shopifyMediaGid: String(row.shopify_media_gid),
-          score: Number(row.score),
-        };
-      });
+        const hits = (response.results ?? []).map((hit) => {
+          const row = hit as Record<string, unknown>;
+          return {
+            vectorId: String(row.vector_id),
+            shopifyProductGid: String(row.shopify_product_gid),
+            shopifyMediaGid: String(row.shopify_media_gid),
+            score: Number(row.score),
+          };
+        });
+        logger.info(
+          {
+            event: "milvus.search_completed",
+            collectionName,
+            shopDomain: input.shopDomain,
+            limit: input.limit,
+            hitsCount: hits.length,
+            filter,
+            durationMs: Math.round(performance.now() - startedAtMs),
+          },
+          "milvus search completed",
+        );
+        return hits;
+      } catch (error) {
+        logger.error(
+          {
+            event: "milvus.error",
+            operation: "search",
+            collectionName,
+            shopDomain: input.shopDomain,
+            durationMs: Math.round(performance.now() - startedAtMs),
+            ...errorLogFields(error),
+          },
+          "milvus search failed",
+        );
+        throw error;
+      }
     },
 
     async getVectorById(vectorId: string): Promise<number[] | null> {
+      await this.ensureCollection();
       const response = await client.query({
         collection_name: collectionName,
         filter: `vector_id == "${escapeMilvusString(vectorId)}"`,
@@ -135,16 +220,62 @@ export function createMilvusVectorStore(input: { client: MilvusSdkLike; collecti
       const row = response.data?.[0] as { embedding?: number[] } | undefined;
       return row?.embedding ?? null;
     },
+
+    async deleteVectorById(vectorId: string): Promise<void> {
+      await this.ensureCollection();
+      await client.delete({
+        collection_name: collectionName,
+        filter: `vector_id == "${escapeMilvusString(vectorId)}"`,
+      });
+      await client.flushSync({ collection_names: [collectionName] });
+      logger.info({ event: "milvus.delete_completed", collectionName, vectorId }, "milvus vector deleted");
+    },
+
+    async deleteProductVectors(input: { shopDomain: string; shopifyProductGid: string }): Promise<void> {
+      const filter = `${shopFilter(input.shopDomain)} && shopify_product_gid == "${escapeMilvusString(input.shopifyProductGid)}"`;
+      await this.ensureCollection();
+      await client.delete({ collection_name: collectionName, filter });
+      await client.flushSync({ collection_names: [collectionName] });
+      logger.info(
+        {
+          event: "milvus.delete_completed",
+          collectionName,
+          shopDomain: input.shopDomain,
+          shopifyProductGid: input.shopifyProductGid,
+        },
+        "milvus product vectors deleted",
+      );
+    },
   };
 }
 
-export function createDefaultMilvusVectorStore(config: {
-  milvusAddress: string;
-  milvusUsername: string;
-  milvusPassword: string;
+export function resolveShopMilvusCollection(config: {
   milvusCollection: string;
+  milvusCollectionPrefix?: string;
   embeddingDimension: number;
-}) {
+  embeddingModelAlias?: string;
+}, shopDomain?: string | null): string {
+  if (!shopDomain) return config.milvusCollection;
+  return createShopMilvusCollectionName({
+    prefix: config.milvusCollectionPrefix ?? config.milvusCollection,
+    shopDomain,
+    embeddingDimension: config.embeddingDimension,
+    embeddingModelAlias: config.embeddingModelAlias ?? "clip",
+  });
+}
+
+export function createDefaultMilvusVectorStore(
+  config: {
+    milvusAddress: string;
+    milvusUsername: string;
+    milvusPassword: string;
+    milvusCollection: string;
+    milvusCollectionPrefix?: string;
+    embeddingDimension: number;
+    embeddingModelAlias?: string;
+  },
+  options: { shopDomain?: string | null } = {},
+) {
   const require = createRequire(import.meta.url);
   const { MilvusClient } = require("@zilliz/milvus2-sdk-node") as {
     MilvusClient: new (config: { address: string; username?: string; password?: string }) => MilvusSdkLike;
@@ -154,10 +285,19 @@ export function createDefaultMilvusVectorStore(config: {
     username: config.milvusUsername || undefined,
     password: config.milvusPassword || undefined,
   });
+  const collectionName = resolveShopMilvusCollection(config, options.shopDomain);
+  logger.info(
+    {
+      event: "milvus.collection_resolved",
+      shopDomain: options.shopDomain ?? null,
+      collectionName,
+    },
+    "resolved milvus collection",
+  );
 
   return createMilvusVectorStore({
     client,
-    collectionName: config.milvusCollection,
+    collectionName,
     dimension: config.embeddingDimension,
   });
 }

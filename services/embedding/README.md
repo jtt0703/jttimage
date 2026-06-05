@@ -1,6 +1,6 @@
 # LensCart AI Embedding Service
 
-Runs CLIP ViT-B/16 image embedding for the Shopify app backend.
+Runs CLIP ViT-B/32 image embedding for the Shopify app backend.
 
 ## Local setup
 
@@ -10,14 +10,14 @@ python3 -m venv .venv
 . .venv/bin/activate
 pip install -e '.[test]'
 pip install -e '.[download]'
-python -c "from modelscope import snapshot_download; print(snapshot_download('openai-mirror/clip-vit-base-patch16', cache_dir='/Users/apple/Desktop/test'))"
+python -c "from modelscope import snapshot_download; print(snapshot_download('openai-mirror/clip-vit-base-patch32', cache_dir='/Users/apple/Desktop/test'))"
 uvicorn app.main:app --host 127.0.0.1 --port 8001
 ```
 
 The service loads the local ModelScope snapshot first when this directory exists:
 
 ```txt
-/Users/apple/Desktop/test/openai-mirror/clip-vit-base-patch16
+/Users/apple/Desktop/test/openai-mirror/clip-vit-base-patch32
 ```
 
 Override the local model directory with `IMAGE_EMBEDDING_MODEL_LOCAL_DIR`.
@@ -32,5 +32,5 @@ pytest
 Expected `/health` response:
 
 ```json
-{"ok":true,"model":"openai/clip-vit-base-patch16","modelAlias":"clip-vit-b-16","dimension":512}
+{"ok":true,"model":"openai/clip-vit-base-patch32","modelAlias":"clip-vit-b-32","dimension":512,"modelLoaded":false,"maxConcurrency":1}
 ```

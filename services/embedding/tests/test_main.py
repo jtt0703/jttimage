@@ -17,12 +17,12 @@ def test_health_returns_model_metadata():
     client = TestClient(app)
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {
-        "ok": True,
-        "model": "openai/clip-vit-base-patch16",
-        "modelAlias": "clip-vit-b-16",
-        "dimension": 512,
-    }
+    body = response.json()
+    assert body["ok"] is True
+    assert body["model"] == "openai/clip-vit-base-patch32"
+    assert body["modelAlias"] == "clip-vit-b-32"
+    assert body["dimension"] == 512
+    assert body["maxConcurrency"] >= 1
 
 
 def test_resolve_model_source_prefers_existing_local_directory(monkeypatch, tmp_path):
@@ -50,8 +50,8 @@ def test_embed_image_file_returns_normalized_512_vector(monkeypatch):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["model"] == "openai/clip-vit-base-patch16"
-    assert body["modelAlias"] == "clip-vit-b-16"
+    assert body["model"] == "openai/clip-vit-base-patch32"
+    assert body["modelAlias"] == "clip-vit-b-32"
     assert body["dimension"] == 512
     assert len(body["embedding"]) == 512
     assert sum(value * value for value in body["embedding"]) == 1.0
@@ -72,8 +72,8 @@ def test_embed_image_url_json_returns_normalized_512_vector(monkeypatch):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["model"] == "openai/clip-vit-base-patch16"
-    assert body["modelAlias"] == "clip-vit-b-16"
+    assert body["model"] == "openai/clip-vit-base-patch32"
+    assert body["modelAlias"] == "clip-vit-b-32"
     assert body["dimension"] == 512
     assert len(body["embedding"]) == 512
     assert sum(value * value for value in body["embedding"]) == 1.0

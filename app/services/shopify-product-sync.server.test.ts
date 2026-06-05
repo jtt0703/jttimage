@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { mapShopifyProductNode } from "./shopify-product-sync.server";
 
 describe("mapShopifyProductNode", () => {

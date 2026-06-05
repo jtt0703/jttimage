@@ -40,21 +40,54 @@ export interface MilvusSearchHit {
   score: number;
 }
 
+export interface ImageSearchTimingMeta {
+  totalMs: number;
+  serviceMs: number;
+  uploadParseMs?: number;
+  thumbnailMs?: number;
+  embeddingMs?: number;
+  milvusSearchMs?: number;
+  hitProcessingMs?: number;
+  favoriteLookupMs?: number;
+  productLookupMs?: number;
+  resultBuildMs?: number;
+  uploadHistoryMs?: number;
+  recentUploadsMs?: number;
+}
+
 export interface ImageSearchConfig {
   milvusAddress: string;
   milvusUsername: string;
   milvusPassword: string;
   milvusCollection: string;
+  milvusCollectionPrefix: string;
   milvusMetricType: "IP";
   embeddingServiceUrl: string;
   embeddingModel: string;
   embeddingModelAlias: string;
   embeddingDimension: number;
+  embeddingRequestTimeoutMs: number;
+  embeddingRequestRetries: number;
+  embeddingCircuitFailureThreshold: number;
+  embeddingCircuitResetMs: number;
   imageSearchMinSimilarityScore: number;
+  imageSearchSyncTimeoutMs: number;
   uploadStorageProvider: "local" | "s3";
   uploadStorageLocalDir: string;
   uploadStoragePublicBaseUrl: string;
   uploadStoreOriginals: boolean;
+  uploadStorageBucket: string;
+  uploadStorageEndpoint: string;
+  uploadStorageRegion: string;
+  uploadStorageAccessKeyId: string;
+  uploadStorageSecretAccessKey: string;
+  uploadStorageForcePathStyle: boolean;
+  productIndexQueueConcurrency: number;
+  redisUrl: string;
+  shopifyProductQuery: string;
+  shopifyProductsPageSize: number;
+  shopifyMediaPageSize: number;
+  shopifyVariantsPageSize: number;
   shopifyAppProxyPrefix: string;
   storefrontCorsOrigins: string[];
 }

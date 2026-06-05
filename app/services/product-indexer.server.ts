@@ -2,6 +2,7 @@ import type { PrismaClient, ShopProductImage } from "@prisma/client";
 import { getImageSearchConfig } from "../lib/image-search/env.server";
 import { createMilvusVectorId } from "../lib/image-search/hash.server";
 import type { ProductIndexMode } from "../lib/image-search/types";
+import { errorLogFields, logger } from "../lib/logger.server";
 import { createEmbeddingClient } from "./embedding-client.server";
 import { createDefaultMilvusVectorStore } from "./milvus-client.server";
 import {
@@ -37,31 +38,73 @@ export function shouldIndexImage(input: {
 export async function runProductImageIndexJob(input: {
   prisma: PrismaClient;
   admin: { graphql(query: string, options: unknown): Promise<Response> };
-  mode: ProductIndexMode;
+  mode?: ProductIndexMode;
+  jobId?: string;
 }) {
   const config = getImageSearchConfig();
+  const existingJob = input.jobId
+    ? await input.prisma.productIndexJob.findUnique({ where: { id: input.jobId } })
+    : null;
+  if (input.jobId && !existingJob) {
+    throw new Error(`ProductIndexJob not found: ${input.jobId}`);
+  }
+  const mode: ProductIndexMode = existingJob?.mode === "force" || input.mode === "force" ? "force" : "incremental";
+  const sourceFilter =
+    existingJob?.sourceFilter ??
+    ({
+      query: config.shopifyProductQuery,
+      mode: "configured_product_query",
+      first: config.shopifyProductsPageSize,
+    } as const);
   const fetched = await fetchShopifyProductsForIndex({
     admin: input.admin,
-    query: DEVELOPMENT_SOURCE_FILTER.query,
-    first: 25,
+    query: config.shopifyProductQuery,
+    first: config.shopifyProductsPageSize,
+    mediaFirst: config.shopifyMediaPageSize,
+    variantsFirst: config.shopifyVariantsPageSize,
   });
-  const job = await input.prisma.productIndexJob.create({
-    data: {
-      shopDomain: fetched.shopDomain,
-      status: "running",
-      mode: input.mode,
-      sourceFilter: DEVELOPMENT_SOURCE_FILTER,
-      startedAt: new Date(),
-    },
-  });
+  const job = input.jobId
+    ? await input.prisma.productIndexJob.update({
+        where: { id: input.jobId },
+        data: {
+          shopDomain: fetched.shopDomain,
+          status: "running",
+          mode,
+          sourceFilter,
+          startedAt: new Date(),
+          completedAt: null,
+          errorMessage: null,
+        },
+      })
+    : await input.prisma.productIndexJob.create({
+        data: {
+          shopDomain: fetched.shopDomain,
+          status: "running",
+          mode,
+          sourceFilter,
+          startedAt: new Date(),
+        },
+      });
 
   const embeddingClient = createEmbeddingClient(config);
-  const vectorStore = createDefaultMilvusVectorStore(config);
+  const vectorStore = createDefaultMilvusVectorStore(config, { shopDomain: fetched.shopDomain });
   let variantsSeen = 0;
   let imagesSeen = 0;
   let imagesIndexed = 0;
   let imagesSkipped = 0;
   let imagesFailed = 0;
+
+  logger.info(
+    {
+      event: "product_index.started",
+      jobId: job.id,
+      shopDomain: fetched.shopDomain,
+      mode,
+      collectionName: vectorStore.collectionName,
+      sourceFilter,
+    },
+    "product image index job started",
+  );
 
   try {
     for (const productNode of fetched.products) {
@@ -82,10 +125,10 @@ export async function runProductImageIndexJob(input: {
         if (
           !shouldIndexImage({
             image,
-            mode: input.mode,
+            mode,
             model: config.embeddingModel,
             dimension: config.embeddingDimension,
-            collection: config.milvusCollection,
+            collection: vectorStore.collectionName,
           })
         ) {
           imagesSkipped += 1;
@@ -126,13 +169,25 @@ export async function runProductImageIndexJob(input: {
               embeddingModel: embedding.model,
               embeddingModelAlias: embedding.modelAlias ?? config.embeddingModelAlias,
               embeddingDimension: embedding.dimension,
-              milvusCollection: config.milvusCollection,
+              milvusCollection: vectorStore.collectionName,
               milvusVectorId: vectorId,
               lastEmbeddedAt: new Date(),
               embeddingError: null,
             },
           });
           imagesIndexed += 1;
+          logger.info(
+            {
+              event: "product_index.image_indexed",
+              jobId: job.id,
+              shopDomain: image.shopDomain,
+              shopifyProductGid: image.shopifyProductGid,
+              shopifyMediaGid: image.shopifyMediaGid,
+              vectorId,
+              collectionName: vectorStore.collectionName,
+            },
+            "product image indexed",
+          );
         } catch (error) {
           imagesFailed += 1;
           await input.prisma.shopProductImage.update({
@@ -142,11 +197,23 @@ export async function runProductImageIndexJob(input: {
               embeddingError: error instanceof Error ? error.message.slice(0, 1000) : "Unknown embedding error",
             },
           });
+          logger.warn(
+            {
+              event: "product_index.image_failed",
+              jobId: job.id,
+              shopDomain: image.shopDomain,
+              shopifyProductGid: image.shopifyProductGid,
+              shopifyMediaGid: image.shopifyMediaGid,
+              collectionName: vectorStore.collectionName,
+              ...errorLogFields(error),
+            },
+            "product image indexing failed",
+          );
         }
       }
     }
 
-    return input.prisma.productIndexJob.update({
+    const completedJob = await input.prisma.productIndexJob.update({
       where: { id: job.id },
       data: {
         status: "completed",
@@ -159,6 +226,22 @@ export async function runProductImageIndexJob(input: {
         completedAt: new Date(),
       },
     });
+    logger.info(
+      {
+        event: "product_index.completed",
+        jobId: job.id,
+        shopDomain: fetched.shopDomain,
+        productsSeen: fetched.products.length,
+        variantsSeen,
+        imagesSeen,
+        imagesIndexed,
+        imagesSkipped,
+        imagesFailed,
+        collectionName: vectorStore.collectionName,
+      },
+      "product image index job completed",
+    );
+    return completedJob;
   } catch (error) {
     await input.prisma.productIndexJob.update({
       where: { id: job.id },
@@ -168,6 +251,16 @@ export async function runProductImageIndexJob(input: {
         completedAt: new Date(),
       },
     });
+    logger.error(
+      {
+        event: "product_index.failed",
+        jobId: job.id,
+        shopDomain: fetched.shopDomain,
+        collectionName: vectorStore.collectionName,
+        ...errorLogFields(error),
+      },
+      "product image index job failed",
+    );
     throw error;
   }
 }

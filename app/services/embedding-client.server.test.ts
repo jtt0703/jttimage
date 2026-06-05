@@ -3,8 +3,8 @@ import { createEmbeddingClient, validateEmbeddingResponse } from "./embedding-cl
 
 const config = {
   embeddingServiceUrl: "http://embedding.test",
-  embeddingModel: "openai/clip-vit-base-patch16",
-  embeddingModelAlias: "clip-vit-b-16",
+  embeddingModel: "openai/clip-vit-base-patch32",
+  embeddingModelAlias: "clip-vit-b-32",
   embeddingDimension: 512,
 };
 
@@ -17,16 +17,16 @@ describe("validateEmbeddingResponse", () => {
     const embedding = [1, ...Array(511).fill(0)];
     expect(
       validateEmbeddingResponse(
-        { model: "openai/clip-vit-base-patch16", modelAlias: "other-alias", dimension: 512, embedding },
+        { model: "openai/clip-vit-base-patch32", modelAlias: "other-alias", dimension: 512, embedding },
         config,
       ),
-    ).toEqual({ model: "openai/clip-vit-base-patch16", modelAlias: "other-alias", dimension: 512, embedding });
+    ).toEqual({ model: "openai/clip-vit-base-patch32", modelAlias: "other-alias", dimension: 512, embedding });
   });
 
   it("rejects wrong canonical model", () => {
     expect(() =>
       validateEmbeddingResponse(
-        { model: "wrong", modelAlias: "clip-vit-b-16", dimension: 512, embedding: [1, ...Array(511).fill(0)] },
+        { model: "wrong", modelAlias: "clip-vit-b-32", dimension: 512, embedding: [1, ...Array(511).fill(0)] },
         config,
       ),
     ).toThrow("Embedding model mismatch");
@@ -36,8 +36,8 @@ describe("validateEmbeddingResponse", () => {
     expect(() =>
       validateEmbeddingResponse(
         {
-          model: "openai/clip-vit-base-patch16",
-          modelAlias: "clip-vit-b-16",
+          model: "openai/clip-vit-base-patch32",
+          modelAlias: "clip-vit-b-32",
           dimension: 512,
           embedding: [2, ...Array(511).fill(0)],
         },
@@ -52,7 +52,7 @@ describe("createEmbeddingClient", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
     const client = createEmbeddingClient(config);
     await expect(client.health()).resolves.toEqual({ ok: true });
-    expect(fetch).toHaveBeenCalledWith("http://embedding.test/health");
+    expect(fetch).toHaveBeenCalledWith("http://embedding.test/health", expect.objectContaining({ method: "GET" }));
   });
 
   it("posts image urls as json", async () => {
@@ -61,8 +61,8 @@ describe("createEmbeddingClient", () => {
       vi.fn(async () =>
         new Response(
           JSON.stringify({
-            model: "openai/clip-vit-base-patch16",
-            modelAlias: "clip-vit-b-16",
+            model: "openai/clip-vit-base-patch32",
+            modelAlias: "clip-vit-b-32",
             dimension: 512,
             embedding: [1, ...Array(511).fill(0)],
           }),

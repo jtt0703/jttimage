@@ -24,7 +24,7 @@ export async function getSimilarProducts(input: {
   availableOnly: boolean;
 }) {
   const config = getImageSearchConfig();
-  const vectorStore = createDefaultMilvusVectorStore(config);
+  const vectorStore = createDefaultMilvusVectorStore(config, { shopDomain: input.shopDomain });
   const product = await input.prisma.shopProduct.findUnique({
     where: { shopDomain_shopifyProductGid: { shopDomain: input.shopDomain, shopifyProductGid: input.productGid } },
     include: { images: true },

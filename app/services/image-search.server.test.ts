@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { dedupeHitsByProduct, filterHitsByDominantProductCategory, inferProductSearchCategory } from "./image-search.server";
+import {
+  createImageSearchTiming,
+  dedupeHitsByProduct,
+  filterHitsByDominantProductCategory,
+  inferProductSearchCategory,
+} from "./image-search.server";
 
 describe("dedupeHitsByProduct", () => {
   it("keeps highest scoring hit per product", () => {
@@ -65,5 +70,36 @@ describe("filterHitsByDominantProductCategory", () => {
       { vectorId: "v1", shopifyProductGid: "jacket", shopifyMediaGid: "m1", score: 0.82 },
       { vectorId: "v3", shopifyProductGid: "coat", shopifyMediaGid: "m3", score: 0.72 },
     ]);
+  });
+});
+
+describe("createImageSearchTiming", () => {
+  it("records stage timings and total request timing in milliseconds", async () => {
+    let currentMs = 100;
+    const timing = createImageSearchTiming({
+      now: () => currentMs,
+      requestStartedAtMs: 80,
+      uploadParseMs: 12,
+    });
+
+    currentMs = 110;
+    const embedding = await timing.measure("embeddingMs", async () => {
+      currentMs = 136.4;
+      return "embedded";
+    });
+    currentMs = 151.7;
+    await timing.measure("milvusSearchMs", async () => {
+      currentMs = 160.2;
+    });
+    currentMs = 166.6;
+
+    expect(embedding).toBe("embedded");
+    expect(timing.complete()).toEqual({
+      totalMs: 87,
+      serviceMs: 67,
+      uploadParseMs: 12,
+      embeddingMs: 26,
+      milvusSearchMs: 9,
+    });
   });
 });
