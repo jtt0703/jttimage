@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildProductSearchResults,
   createImageSearchTiming,
   dedupeHitsByProduct,
   filterHitsByDominantProductCategory,
@@ -70,6 +71,61 @@ describe("filterHitsByDominantProductCategory", () => {
       { vectorId: "v1", shopifyProductGid: "jacket", shopifyMediaGid: "m1", score: 0.82 },
       { vectorId: "v3", shopifyProductGid: "coat", shopifyMediaGid: "m3", score: 0.72 },
     ]);
+  });
+});
+
+describe("buildProductSearchResults", () => {
+  it("dedupes products and prefers the matched product image on the card", () => {
+    const results = buildProductSearchResults({
+      hits: [
+        { vectorId: "v1", shopifyProductGid: "p1", shopifyMediaGid: "media-featured", score: 0.81 },
+        { vectorId: "v2", shopifyProductGid: "p1", shopifyMediaGid: "media-second", score: 0.92 },
+      ],
+      products: [
+        {
+          shopifyProductGid: "p1",
+          title: "Black Aviator Sunglasses",
+          handle: "black-aviator-sunglasses",
+          productType: "Sunglasses",
+          tags: [],
+          featuredImageUrl: "https://cdn.example.com/featured.png",
+          minPrice: "29.99",
+          currencyCode: "USD",
+          availableForSale: true,
+          variants: [
+            {
+              shopifyVariantGid: "variant-1",
+              shopifyVariantNumericId: "1",
+              title: "Default Title",
+              price: "29.99",
+              compareAtPrice: null,
+              availableForSale: true,
+            },
+          ],
+          images: [
+            {
+              shopifyMediaGid: "media-featured",
+              imageUrl: "https://cdn.example.com/featured.png",
+              isFeatured: true,
+            },
+            {
+              shopifyMediaGid: "media-second",
+              imageUrl: "https://cdn.example.com/second.png",
+              isFeatured: false,
+            },
+          ],
+        },
+      ],
+      favoriteProductGids: [],
+      limit: 9,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      productGid: "p1",
+      imageUrl: "https://cdn.example.com/second.png",
+      similarityScore: 0.92,
+    });
   });
 });
 

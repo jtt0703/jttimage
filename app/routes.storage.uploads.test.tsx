@@ -19,6 +19,7 @@ function loaderArgs(requestUrl: string, storageKey: string) {
 
 describe("storage uploads route", () => {
   beforeEach(async () => {
+    vi.stubEnv("UPLOAD_STORAGE_PROVIDER", "local");
     vi.stubEnv("UPLOAD_STORAGE_LOCAL_DIR", uploadRoot);
     await mkdir(path.join(process.cwd(), uploadRoot, "demo-shop.myshopify.com", "upload-1"), { recursive: true });
   });

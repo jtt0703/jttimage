@@ -12,11 +12,34 @@ import { createUploadStorage } from "./upload-storage.server";
 import { createUploadHistory, listRecentUploads } from "./upload-history.server";
 
 type ImageSearchTimingStage = Exclude<keyof ImageSearchTimingMeta, "totalMs" | "serviceMs" | "uploadParseMs">;
+type DecimalLike = { toString(): string } | string | number | null | undefined;
 
 interface ProductCategoryInput {
   title: string;
   productType?: string | null;
   tags?: string[] | null;
+}
+
+interface ProductSearchProductInput extends ProductCategoryInput {
+  shopifyProductGid: string;
+  handle: string;
+  featuredImageUrl: string | null;
+  minPrice: DecimalLike;
+  currencyCode: string | null;
+  availableForSale: boolean;
+  variants: Array<{
+    shopifyVariantGid: string;
+    shopifyVariantNumericId: string;
+    title: string;
+    price: DecimalLike;
+    compareAtPrice: DecimalLike;
+    availableForSale: boolean;
+  }>;
+  images: Array<{
+    shopifyMediaGid: string;
+    imageUrl: string;
+    isFeatured: boolean;
+  }>;
 }
 
 const SEARCH_CATEGORY_KEYWORDS: Array<{ category: string; keywords: string[] }> = [
@@ -140,6 +163,39 @@ export function dedupeHitsByProduct(
   return options.limit === undefined ? deduped : deduped.slice(0, options.limit);
 }
 
+export function buildProductSearchResults(input: {
+  hits: MilvusSearchHit[];
+  products: ProductSearchProductInput[];
+  favoriteProductGids: string[];
+  limit: number;
+}) {
+  const productByGid = new Map(input.products.map((product) => [product.shopifyProductGid, product]));
+  const dedupedHits = dedupeHitsByProduct(input.hits);
+  const hits = filterHitsByDominantProductCategory(dedupedHits, productByGid).slice(0, input.limit);
+  const mediaGidsByProduct = new Map(hits.map((hit) => [hit.shopifyProductGid, hit.shopifyMediaGid]));
+  const scoreByProduct = new Map(hits.map((hit) => [hit.shopifyProductGid, hit.score]));
+  const favoriteSet = new Set(input.favoriteProductGids);
+
+  return hits
+    .map((hit) => {
+      const product = productByGid.get(hit.shopifyProductGid);
+      if (!product) return null;
+      const mediaGid = mediaGidsByProduct.get(product.shopifyProductGid);
+      const image =
+        product.images.find((item) => item.shopifyMediaGid === mediaGid) ??
+        product.images.find((item) => item.isFeatured) ??
+        product.images[0];
+      return buildProductCardDTO({
+        product,
+        variants: product.variants,
+        imageUrl: image?.imageUrl ?? product.featuredImageUrl,
+        similarityScore: scoreByProduct.get(product.shopifyProductGid) ?? null,
+        isFavorited: favoriteSet.has(product.shopifyProductGid),
+      });
+    })
+    .filter((value): value is NonNullable<typeof value> => Boolean(value));
+}
+
 export async function runImageSearch(input: {
   prisma: PrismaClient;
   shopDomain: string;
@@ -214,17 +270,16 @@ export async function runImageSearch(input: {
         candidateProductGids: candidateHits.map((hit) => hit.shopifyProductGid),
       };
     });
-    const favoriteGids = await timing.measure("favoriteLookupMs", () =>
-      listFavoriteProductGids({
-        prisma: input.prisma,
-        shopDomain: input.shopDomain,
-        identityType: input.customerGid ? "customer" : "anonymous",
-        identityId: input.customerGid ?? input.anonymousId,
-      }),
-    );
-    const favoriteSet = new Set(favoriteGids);
+	    const favoriteGids = await timing.measure("favoriteLookupMs", () =>
+	      listFavoriteProductGids({
+	        prisma: input.prisma,
+	        shopDomain: input.shopDomain,
+	        identityType: input.customerGid ? "customer" : "anonymous",
+	        identityId: input.customerGid ?? input.anonymousId,
+	      }),
+	    );
 
-    const products = await timing.measure("productLookupMs", () =>
+	    const products = await timing.measure("productLookupMs", () =>
       input.prisma.shopProduct.findMany({
         where: {
           shopDomain: input.shopDomain,
@@ -237,28 +292,12 @@ export async function runImageSearch(input: {
     );
 
     const results = await timing.measure("resultBuildMs", async () => {
-      const productByGid = new Map(products.map((product) => [product.shopifyProductGid, product]));
-      const hits = filterHitsByDominantProductCategory(candidateHits, productByGid).slice(0, input.limit);
-      const mediaGidsByProduct = new Map(hits.map((hit) => [hit.shopifyProductGid, hit.shopifyMediaGid]));
-      const scoreByProduct = new Map(hits.map((hit) => [hit.shopifyProductGid, hit.score]));
-      return hits
-        .map((hit) => {
-          const product = productByGid.get(hit.shopifyProductGid);
-          if (!product) return null;
-          const mediaGid = mediaGidsByProduct.get(product.shopifyProductGid);
-          const image =
-            product.images.find((item) => item.shopifyMediaGid === mediaGid) ??
-            product.images.find((item) => item.isFeatured) ??
-            product.images[0];
-          return buildProductCardDTO({
-            product,
-            variants: product.variants,
-            imageUrl: image?.imageUrl ?? product.featuredImageUrl,
-            similarityScore: scoreByProduct.get(product.shopifyProductGid) ?? null,
-            isFavorited: favoriteSet.has(product.shopifyProductGid),
-          });
-        })
-        .filter((value): value is NonNullable<typeof value> => Boolean(value));
+      return buildProductSearchResults({
+        hits: candidateHits,
+        products,
+        favoriteProductGids: favoriteGids,
+        limit: input.limit,
+      });
     });
 
     const searchUpload = await timing.measure("uploadHistoryMs", () =>

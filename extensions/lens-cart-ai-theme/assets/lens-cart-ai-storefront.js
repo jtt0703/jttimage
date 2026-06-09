@@ -79,6 +79,27 @@
     }
   }
 
+  function isThemeEditorPreview() {
+    return Boolean(window.Shopify && window.Shopify.designMode);
+  }
+
+  function openProduct(product, status) {
+    if (isThemeEditorPreview()) {
+      status.textContent = "Product detail links are disabled inside the theme editor preview.";
+      return;
+    }
+    window.location.assign(`/products/${product.handle}`);
+  }
+
+  function renderFavoriteIcon(isFavorited) {
+    return `
+      <svg class="lenscart-ai-favorite-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path class="lenscart-ai-favorite-heart" d="M20.8 4.9c-2.1-2-5.4-1.7-7.2.5L12 7.2l-1.6-1.8C8.6 3.2 5.3 2.9 3.2 4.9.8 7.2.7 11 3 13.4l9 8.2 9-8.2c2.3-2.4 2.2-6.2-.2-8.5Z"></path>
+      </svg>
+      <span class="lenscart-ai-sr-only">${isFavorited ? "Remove from favorites" : "Save to favorites"}</span>
+    `;
+  }
+
   function renderProducts(container, products, status, shop, apiBaseUrl, sourceSurface, onFindSimilar) {
     const favoritesKey = keys.favorites(shop);
     const favorites = new Set(readJson(favoritesKey, []));
@@ -87,7 +108,7 @@
       const card = document.createElement("article");
       card.className = "lenscart-ai-card";
       card.tabIndex = 0;
-      card.addEventListener("click", () => { window.location.href = `/products/${product.handle}`; });
+      card.addEventListener("click", () => openProduct(product, status));
 
       const image = document.createElement("img");
       image.src = product.imageUrl || "";
@@ -97,13 +118,18 @@
       const favorite = document.createElement("button");
       favorite.type = "button";
       favorite.className = "lenscart-ai-favorite";
-      favorite.textContent = favorites.has(product.productGid) || product.isFavorited ? "♥" : "♡";
+      const initialFavorited = favorites.has(product.productGid) || product.isFavorited;
+      favorite.setAttribute("aria-pressed", initialFavorited ? "true" : "false");
+      favorite.setAttribute("aria-label", initialFavorited ? "Remove from favorites" : "Save to favorites");
+      favorite.innerHTML = renderFavoriteIcon(initialFavorited);
       favorite.addEventListener("click", async (event) => {
         event.stopPropagation();
         const isFavorited = favorites.has(product.productGid);
         if (isFavorited) favorites.delete(product.productGid); else favorites.add(product.productGid);
         writeJson(favoritesKey, Array.from(favorites));
-        favorite.textContent = isFavorited ? "♡" : "♥";
+        favorite.setAttribute("aria-pressed", isFavorited ? "false" : "true");
+        favorite.setAttribute("aria-label", isFavorited ? "Save to favorites" : "Remove from favorites");
+        favorite.innerHTML = renderFavoriteIcon(!isFavorited);
         status.textContent = isFavorited
           ? "Removed from favorites."
           : "Saved to favorites. Favorites are marked with a filled heart in Image Search.";
@@ -175,20 +201,29 @@
     const recent = root.querySelector("[data-lenscart-recent]");
     const availableOnly = root.querySelector("[data-lenscart-available-only]");
 
+    function setModalStatus(message, state) {
+      status.textContent = message;
+      if (state) {
+        status.dataset.state = state;
+      } else {
+        delete status.dataset.state;
+      }
+    }
+
     async function searchByFile(file, previewUrl) {
       preview.innerHTML = "";
       const img = document.createElement("img");
       img.src = previewUrl || URL.createObjectURL(file);
       img.alt = "Uploaded image preview";
       preview.appendChild(img);
-      status.textContent = "Searching…";
+      setModalStatus("Scanning image and matching products…", "loading");
       results.innerHTML = "";
 
       const form = new FormData();
       form.append("image", file);
       form.append("shop", shop);
       form.append("anonymousId", getAnonymousId());
-      form.append("limit", "12");
+      form.append("limit", "9");
       form.append("availableOnly", availableOnly.checked ? "true" : "false");
       form.append("sort", "most_relevant");
 
@@ -196,7 +231,7 @@
       const body = await readJsonResponse(response);
       if (!response.ok) throw new Error(body.error || "Something went wrong. Please try again.");
       const searchResults = Array.isArray(body.results) ? body.results : [];
-      status.textContent = searchResults.length ? "" : "No similar products found.";
+      setModalStatus(searchResults.length ? "" : "No similar products found.");
       renderProducts(results, searchResults, status, shop, apiBaseUrl, "image_search", findSimilarProducts);
       renderRecent(body.recentUploads || []);
       writeJson(keys.favorites(shop), body.favorites || readJson(keys.favorites(shop), []));
@@ -204,7 +239,7 @@
 
     async function searchRecentUpload(item) {
       try {
-        status.textContent = "Searching this image…";
+        setModalStatus("Scanning this recent image…", "loading");
         const thumbnailUrl = storefrontAssetUrl(item.thumbnailUrl, apiBaseUrl);
         const response = await fetch(storefrontAssetUrl(item.thumbnailUrl, apiBaseUrl));
         if (!response.ok) throw new Error("Recent upload unavailable.");
@@ -212,28 +247,28 @@
         const file = new File([blob], "recent-upload.webp", { type: blob.type || "image/webp" });
         await searchByFile(file, thumbnailUrl);
       } catch (error) {
-        status.textContent = error && error.message ? error.message : "Recent upload unavailable.";
+        setModalStatus(error && error.message ? error.message : "Recent upload unavailable.");
       }
     }
 
     async function findSimilarProducts(product) {
       try {
-        status.textContent = "Finding similar products…";
+        setModalStatus("Finding products with a similar look…", "loading");
         const params = new URLSearchParams({
           shop,
           productGid: product.productGid,
           anonymousId: getAnonymousId(),
-          limit: "12",
+          limit: "9",
           availableOnly: availableOnly.checked ? "true" : "false",
         });
         const response = await fetch(`${apiBaseUrl}/recommendations/similar-products?${params}`);
         const body = await readJsonResponse(response);
         if (!response.ok) throw new Error(body.error || "Similar products unavailable.");
         const similarResults = Array.isArray(body.results) ? body.results : [];
-        status.textContent = similarResults.length ? `Showing products similar to ${product.title}.` : "No similar products found.";
+        setModalStatus(similarResults.length ? `Showing products similar to ${product.title}.` : "No similar products found.");
         renderProducts(results, similarResults, status, shop, apiBaseUrl, "image_search", findSimilarProducts);
       } catch (_error) {
-        status.textContent = "Similar products unavailable.";
+        setModalStatus("Similar products unavailable.");
       }
     }
 
@@ -261,17 +296,17 @@
       const file = fileInput.files && fileInput.files[0];
       if (!file) return;
       if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
-        status.textContent = "Please upload a JPG, PNG, or WebP image.";
+        setModalStatus("Please upload a JPG, PNG, or WebP image.");
         return;
       }
       if (file.size > 5 * 1024 * 1024) {
-        status.textContent = "Image is too large. Please upload a smaller image.";
+        setModalStatus("Image is too large. Please upload a smaller image.");
         return;
       }
       try {
         await searchByFile(file);
       } catch (error) {
-        status.textContent = error && error.message ? error.message : "Something went wrong. Please try again.";
+        setModalStatus(error && error.message ? error.message : "Something went wrong. Please try again.");
       }
     });
   }

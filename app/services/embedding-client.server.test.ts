@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createEmbeddingClient, validateEmbeddingResponse } from "./embedding-client.server";
+import {
+  createEmbeddingClient,
+  EmbeddingServiceTimeoutError,
+  EmbeddingServiceUnavailableError,
+  validateEmbeddingResponse,
+} from "./embedding-client.server";
 
 const config = {
   embeddingServiceUrl: "http://embedding.test",
@@ -77,5 +82,40 @@ describe("createEmbeddingClient", () => {
       "http://embedding.test/embed/image",
       expect.objectContaining({ method: "POST", headers: { "Content-Type": "application/json" } }),
     );
+  });
+
+  it("normalizes fetch network failures as embedding service unavailable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("fetch failed");
+      }),
+    );
+    const client = createEmbeddingClient({
+      ...config,
+      embeddingRequestRetries: 1,
+      embeddingCircuitFailureThreshold: 99,
+    });
+
+    await expect(client.health()).rejects.toBeInstanceOf(EmbeddingServiceUnavailableError);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("normalizes abort errors as embedding service timeout", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        const error = new Error("This operation was aborted");
+        error.name = "AbortError";
+        throw error;
+      }),
+    );
+    const client = createEmbeddingClient({
+      ...config,
+      embeddingRequestRetries: 0,
+      embeddingCircuitFailureThreshold: 99,
+    });
+
+    await expect(client.health()).rejects.toBeInstanceOf(EmbeddingServiceTimeoutError);
   });
 });

@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient, ShopProductImage } from "@prisma/client";
 import { createImageUrlHash } from "../lib/image-search/hash.server";
 import { logger } from "../lib/logger.server";
 
@@ -71,6 +71,69 @@ query ImageSearchProducts($query: String!, $first: Int!, $after: String, $mediaF
   }
 }`;
 
+export const IMAGE_SEARCH_PRODUCT_QUERY = `#graphql
+query ImageSearchProduct($id: ID!, $mediaFirst: Int!, $variantsFirst: Int!) {
+  shop {
+    myshopifyDomain
+    currencyCode
+  }
+  product(id: $id) {
+    id
+    title
+    handle
+    status
+    vendor
+    productType
+    tags
+    featuredMedia {
+      ... on MediaImage {
+        id
+        image {
+          id
+          url
+          altText
+          width
+          height
+        }
+      }
+    }
+    media(first: $mediaFirst) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        ... on MediaImage {
+          id
+          image {
+            id
+            url
+            altText
+            width
+            height
+          }
+        }
+      }
+    }
+    variants(first: $variantsFirst) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        id
+        legacyResourceId
+        title
+        sku
+        price
+        compareAtPrice
+        availableForSale
+        inventoryQuantity
+      }
+    }
+  }
+}`;
+
 type ShopifyConnection<T> = {
   nodes: T[];
   pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
@@ -138,6 +201,11 @@ type MappedImage = {
   isFeatured: boolean;
   imageUrlHash: string;
 };
+
+type StaleIndexedImage = Pick<
+  ShopProductImage,
+  "id" | "shopDomain" | "shopifyProductGid" | "shopifyMediaGid" | "milvusCollection" | "milvusVectorId"
+>;
 
 export function mapShopifyProductNode(input: {
   shopDomain: string;
@@ -288,9 +356,54 @@ export async function fetchShopifyProductsForIndex(input: {
   };
 }
 
+export async function fetchShopifyProductForIndex(input: {
+  admin: { graphql(query: string, options: unknown): Promise<Response> };
+  productGid: string;
+  mediaFirst?: number;
+  variantsFirst?: number;
+}) {
+  logger.info(
+    {
+      event: "shopify_sync.product_fetch_started",
+      shopifyProductGid: input.productGid,
+    },
+    "fetching shopify product",
+  );
+  const response = await input.admin.graphql(IMAGE_SEARCH_PRODUCT_QUERY, {
+    variables: {
+      id: input.productGid,
+      mediaFirst: input.mediaFirst ?? 25,
+      variantsFirst: input.variantsFirst ?? 50,
+    },
+  });
+  const body = await response.json();
+  if (body.errors) {
+    throw new Error(`Shopify Admin GraphQL failed: ${JSON.stringify(body.errors)}`);
+  }
+
+  const shopDomain = body.data.shop.myshopifyDomain as string;
+  const product = body.data.product as ShopifyProductNode | null;
+  logger.info(
+    {
+      event: "shopify_sync.product_fetch_completed",
+      shopDomain,
+      shopifyProductGid: input.productGid,
+      found: Boolean(product),
+    },
+    "shopify product fetched",
+  );
+
+  return {
+    shopDomain,
+    currencyCode: body.data.shop.currencyCode as string,
+    products: product ? [product] : [],
+  };
+}
+
 export async function upsertMappedProduct(input: {
   prisma: PrismaClient;
   mapped: ReturnType<typeof mapShopifyProductNode>;
+  onStaleIndexedImage?: (image: StaleIndexedImage) => Promise<void>;
 }) {
   const product = await input.prisma.shopProduct.upsert({
     where: {
@@ -315,6 +428,13 @@ export async function upsertMappedProduct(input: {
       create: { ...variant, productId: product.id },
     });
   }
+  const currentVariantGids = input.mapped.variants.map((variant) => variant.shopifyVariantGid);
+  await input.prisma.shopProductVariant.deleteMany({
+    where: {
+      productId: product.id,
+      ...(currentVariantGids.length > 0 ? { shopifyVariantGid: { notIn: currentVariantGids } } : {}),
+    },
+  });
 
   for (const image of input.mapped.images) {
     const existing = await input.prisma.shopProductImage.findUnique({
@@ -340,6 +460,31 @@ export async function upsertMappedProduct(input: {
         ...(shouldResetEmbedding ? { embeddingStatus: "pending", embeddingError: null } : {}),
       },
       create: { ...image, productId: product.id, embeddingStatus: "pending" },
+    });
+  }
+  const currentMediaGids = input.mapped.images.map((image) => image.shopifyMediaGid);
+  const staleImages = await input.prisma.shopProductImage.findMany({
+    where: {
+      productId: product.id,
+      ...(currentMediaGids.length > 0 ? { shopifyMediaGid: { notIn: currentMediaGids } } : {}),
+    },
+    select: {
+      id: true,
+      shopDomain: true,
+      shopifyProductGid: true,
+      shopifyMediaGid: true,
+      milvusCollection: true,
+      milvusVectorId: true,
+    },
+  });
+  for (const image of staleImages) {
+    if (input.onStaleIndexedImage) {
+      await input.onStaleIndexedImage(image);
+    }
+  }
+  if (staleImages.length > 0) {
+    await input.prisma.shopProductImage.deleteMany({
+      where: { id: { in: staleImages.map((image) => image.id) } },
     });
   }
 

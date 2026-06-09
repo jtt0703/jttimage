@@ -6,6 +6,7 @@ import type { ImageSearchConfig } from "../lib/image-search/types";
 import { errorLogFields, logger } from "../lib/logger.server";
 
 const THUMBNAIL_CONTENT_TYPE = "image/webp";
+const ORIGINAL_FILENAME_METADATA_MAX_CHARS = 255;
 
 const EXTENSION_BY_CONTENT_TYPE: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -60,6 +61,17 @@ function uploadKeys(input: Pick<SaveUploadInput, "shopDomain" | "uploadId" | "co
   return {
     originalStorageKey: `${prefix}/original.${originalExtension(input.contentType)}`,
     thumbnailStorageKey: `${prefix}/thumbnail.webp`,
+  };
+}
+
+export function buildS3OriginalFilenameMetadata(originalFilename?: string | null): Record<string, string> | undefined {
+  if (!originalFilename) return undefined;
+
+  const truncatedFilename = Array.from(originalFilename).slice(0, ORIGINAL_FILENAME_METADATA_MAX_CHARS).join("");
+  if (!truncatedFilename) return undefined;
+
+  return {
+    originalFilenameBase64: Buffer.from(truncatedFilename, "utf8").toString("base64url"),
   };
 }
 
@@ -184,7 +196,7 @@ export function createUploadStorage(config: ImageSearchConfig): UploadStorage {
                   Body: input.imageBytes,
                   ContentType: input.contentType,
                   CacheControl: "private, max-age=86400",
-                  Metadata: input.originalFilename ? { originalFilename: input.originalFilename.slice(0, 255) } : undefined,
+                  Metadata: buildS3OriginalFilenameMetadata(input.originalFilename),
                 }),
               ),
             );

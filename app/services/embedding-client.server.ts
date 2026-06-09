@@ -71,11 +71,28 @@ function isRetryableStatus(status: number): boolean {
   return status === 408 || status === 429 || status >= 500;
 }
 
+function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && error.name === "AbortError")
+  );
+}
+
 function isRetryableError(error: unknown): boolean {
   if (error instanceof EmbeddingServiceTimeoutError) return true;
   if (error instanceof EmbeddingServiceUnavailableError) return true;
+  if (isAbortError(error)) return true;
   if (error instanceof TypeError) return true;
   return false;
+}
+
+function normalizeFinalRequestError(error: unknown): unknown {
+  if (error instanceof EmbeddingServiceTimeoutError) return error;
+  if (error instanceof EmbeddingServiceUnavailableError) return error;
+  if (isAbortError(error)) return new EmbeddingServiceTimeoutError();
+  if (error instanceof TypeError) return new EmbeddingServiceUnavailableError();
+  if (!error) return new EmbeddingServiceUnavailableError();
+  return error;
 }
 
 export function validateEmbeddingResponse(
@@ -128,7 +145,7 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   try {
     return await fetch(url, { ...init, signal: controller.signal });
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
+    if (isAbortError(error)) {
       throw new EmbeddingServiceTimeoutError();
     }
     throw error;
@@ -197,8 +214,9 @@ async function requestJson(input: {
     }
   }
 
-  recordRequestFailure(input.config, lastError);
-  throw lastError;
+  const finalError = normalizeFinalRequestError(lastError);
+  recordRequestFailure(input.config, finalError);
+  throw finalError;
 }
 
 export function createEmbeddingClient(config: EmbeddingClientConfig) {

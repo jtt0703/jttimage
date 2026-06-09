@@ -3,6 +3,13 @@ import { createShopMilvusCollectionName } from "../lib/image-search/hash.server"
 import type { MilvusSearchHit } from "../lib/image-search/types";
 import { errorLogFields, logger } from "../lib/logger.server";
 
+export class MilvusUnavailableError extends Error {
+  constructor(message = "Milvus vector search is temporarily unavailable", options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "MilvusUnavailableError";
+  }
+}
+
 interface MilvusSdkLike {
   hasCollection(input: { collection_name: string }): Promise<{ value: boolean }>;
   createCollection(input: unknown): Promise<unknown>;
@@ -33,6 +40,23 @@ function escapeMilvusString(value: string): string {
 
 function shopFilter(shopDomain: string): string {
   return `shop_domain == "${escapeMilvusString(shopDomain)}"`;
+}
+
+function isMilvusUnavailableError(error: unknown): boolean {
+  const grpcCode = (error as { code?: unknown } | null)?.code;
+  if (grpcCode === 4 || grpcCode === 14) return true;
+
+  const details = String((error as { details?: unknown } | null)?.details ?? "");
+  const message = error instanceof Error ? error.message : String(error);
+  return /DEADLINE_EXCEEDED|UNAVAILABLE|Waiting for LB pick/i.test(`${details} ${message}`);
+}
+
+function normalizeMilvusError(error: unknown): Error {
+  if (error instanceof MilvusUnavailableError) return error;
+  if (isMilvusUnavailableError(error)) {
+    return new MilvusUnavailableError("Milvus vector search is temporarily unavailable", { cause: error });
+  }
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 export function createMilvusVectorStore(input: { client: MilvusSdkLike; collectionName: string; dimension: number }) {
@@ -130,6 +154,7 @@ export function createMilvusVectorStore(input: { client: MilvusSdkLike; collecti
           "milvus vector upsert completed",
         );
       } catch (error) {
+        const normalizedError = normalizeMilvusError(error);
         logger.error(
           {
             event: "milvus.error",
@@ -138,11 +163,11 @@ export function createMilvusVectorStore(input: { client: MilvusSdkLike; collecti
             shopDomain: vector.shopDomain,
             vectorId: vector.vectorId,
             durationMs: Math.round(performance.now() - startedAtMs),
-            ...errorLogFields(error),
+            ...errorLogFields(normalizedError),
           },
           "milvus vector upsert failed",
         );
-        throw error;
+        throw normalizedError;
       }
     },
 
@@ -194,6 +219,7 @@ export function createMilvusVectorStore(input: { client: MilvusSdkLike; collecti
         );
         return hits;
       } catch (error) {
+        const normalizedError = normalizeMilvusError(error);
         logger.error(
           {
             event: "milvus.error",
@@ -201,11 +227,11 @@ export function createMilvusVectorStore(input: { client: MilvusSdkLike; collecti
             collectionName,
             shopDomain: input.shopDomain,
             durationMs: Math.round(performance.now() - startedAtMs),
-            ...errorLogFields(error),
+            ...errorLogFields(normalizedError),
           },
           "milvus search failed",
         );
-        throw error;
+        throw normalizedError;
       }
     },
 

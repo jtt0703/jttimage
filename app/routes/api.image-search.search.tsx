@@ -10,6 +10,7 @@ import {
 import { errorLogFields, logger } from "../lib/logger.server";
 import { EmbeddingServiceTimeoutError, EmbeddingServiceUnavailableError } from "../services/embedding-client.server";
 import { runImageSearch } from "../services/image-search.server";
+import { MilvusUnavailableError } from "../services/milvus-client.server";
 
 class ImageSearchTimeoutError extends Error {
   constructor() {
@@ -34,7 +35,7 @@ async function withTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise
 
 function errorStatus(error: unknown): number {
   if (error instanceof ImageSearchTimeoutError || error instanceof EmbeddingServiceTimeoutError) return 504;
-  if (error instanceof EmbeddingServiceUnavailableError) return 503;
+  if (error instanceof EmbeddingServiceUnavailableError || error instanceof MilvusUnavailableError) return 503;
   if (error instanceof Error && error.message.startsWith("Please upload")) return 400;
   if (error instanceof Error && error.message.startsWith("Image is too large")) return 400;
   return 500;
@@ -44,7 +45,7 @@ function publicErrorMessage(error: unknown): string {
   if (error instanceof ImageSearchTimeoutError || error instanceof EmbeddingServiceTimeoutError) {
     return "Image search timed out. Please try again with a smaller image.";
   }
-  if (error instanceof EmbeddingServiceUnavailableError) {
+  if (error instanceof EmbeddingServiceUnavailableError || error instanceof MilvusUnavailableError) {
     return "Image search is temporarily unavailable. Please try again later.";
   }
   if (error instanceof Error && (error.message.startsWith("Please upload") || error.message.startsWith("Image is too large"))) {

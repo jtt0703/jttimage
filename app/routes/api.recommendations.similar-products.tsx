@@ -6,6 +6,7 @@ import {
   validateShopDomain,
   verifyShopifyProxySignature,
 } from "../lib/image-search/validation.server";
+import { errorLogFields, logger } from "../lib/logger.server";
 import { getSimilarProducts } from "../services/recommendations.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -16,21 +17,37 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return Response.json({ error: "Invalid app proxy signature" }, { status: 401 });
   }
 
-  const installedSession = await prisma.session.findFirst({ where: { shop: shopDomain } });
-  if (!installedSession) return Response.json({ error: "Shop is not installed" }, { status: 403 });
+  try {
+    const installedSession = await prisma.session.findFirst({ where: { shop: shopDomain } });
+    if (!installedSession) return Response.json({ error: "Shop is not installed" }, { status: 403 });
 
-  const productGid = url.searchParams.get("productGid");
-  if (!productGid?.startsWith("gid://shopify/Product/")) {
-    return Response.json({ error: "Invalid productGid" }, { status: 400 });
+    const productGid = url.searchParams.get("productGid");
+    if (!productGid?.startsWith("gid://shopify/Product/")) {
+      return Response.json({ error: "Invalid productGid" }, { status: 400 });
+    }
+
+    const result = await getSimilarProducts({
+      prisma,
+      shopDomain,
+      productGid,
+      anonymousId: url.searchParams.get("anonymousId"),
+      limit: normalizeLimit(url.searchParams.get("limit"), 10, 24),
+      availableOnly: parseBooleanParam(url.searchParams.get("availableOnly"), true),
+    });
+    return Response.json(result);
+  } catch (error) {
+    logger.error(
+      {
+        event: "recommendations.route_failed",
+        shopDomain,
+        status: 503,
+        ...errorLogFields(error),
+      },
+      "similar products route failed",
+    );
+    return Response.json(
+      { error: "Similar products are temporarily unavailable. Please try again later." },
+      { status: 503 },
+    );
   }
-
-  const result = await getSimilarProducts({
-    prisma,
-    shopDomain,
-    productGid,
-    anonymousId: url.searchParams.get("anonymousId"),
-    limit: normalizeLimit(url.searchParams.get("limit"), 10, 24),
-    availableOnly: parseBooleanParam(url.searchParams.get("availableOnly"), true),
-  });
-  return Response.json(result);
 };

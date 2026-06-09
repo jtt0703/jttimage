@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shouldIndexImage } from "./product-indexer.server";
+import { resolveProductIndexFetchInput, shouldIndexImage } from "./product-indexer.server";
 
 describe("shouldIndexImage", () => {
   const baseImage = {
@@ -53,5 +53,35 @@ describe("shouldIndexImage", () => {
         collection: "product_image_embeddings_512",
       }),
     ).toBe(true);
+  });
+});
+
+describe("resolveProductIndexFetchInput", () => {
+  const config = {
+    shopifyProductQuery: "status:active",
+    shopifyProductsPageSize: 50,
+  };
+
+  it("uses the queued job source filter instead of current env defaults", () => {
+    expect(
+      resolveProductIndexFetchInput(config, {
+        query: "id:123456789",
+        first: 1,
+        mode: "webhook_product",
+        productGid: "gid://shopify/Product/123456789",
+      }),
+    ).toEqual({
+      query: "id:123456789",
+      first: 1,
+      productGid: "gid://shopify/Product/123456789",
+    });
+  });
+
+  it("falls back to configured defaults when a job has no usable source filter", () => {
+    expect(resolveProductIndexFetchInput(config, null)).toEqual({
+      query: "status:active",
+      first: 50,
+      productGid: null,
+    });
   });
 });

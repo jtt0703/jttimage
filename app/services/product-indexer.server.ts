@@ -6,6 +6,7 @@ import { errorLogFields, logger } from "../lib/logger.server";
 import { createEmbeddingClient } from "./embedding-client.server";
 import { createDefaultMilvusVectorStore } from "./milvus-client.server";
 import {
+  fetchShopifyProductForIndex,
   fetchShopifyProductsForIndex,
   mapShopifyProductNode,
   upsertMappedProduct,
@@ -35,6 +36,27 @@ export function shouldIndexImage(input: {
   return false;
 }
 
+export function resolveProductIndexFetchInput(
+  config: { shopifyProductQuery: string; shopifyProductsPageSize: number },
+  sourceFilter: unknown,
+): { query: string; first: number; productGid: string | null } {
+  const filter =
+    sourceFilter && typeof sourceFilter === "object" && !Array.isArray(sourceFilter)
+      ? (sourceFilter as Record<string, unknown>)
+      : {};
+  const query = typeof filter.query === "string" && filter.query.trim() ? filter.query.trim() : config.shopifyProductQuery;
+  const first =
+    typeof filter.first === "number" && Number.isFinite(filter.first) && filter.first > 0
+      ? Math.floor(filter.first)
+      : config.shopifyProductsPageSize;
+  const productGid =
+    typeof filter.productGid === "string" && filter.productGid.startsWith("gid://shopify/Product/")
+      ? filter.productGid
+      : null;
+
+  return { query, first, productGid };
+}
+
 export async function runProductImageIndexJob(input: {
   prisma: PrismaClient;
   admin: { graphql(query: string, options: unknown): Promise<Response> };
@@ -56,13 +78,21 @@ export async function runProductImageIndexJob(input: {
       mode: "configured_product_query",
       first: config.shopifyProductsPageSize,
     } as const);
-  const fetched = await fetchShopifyProductsForIndex({
-    admin: input.admin,
-    query: config.shopifyProductQuery,
-    first: config.shopifyProductsPageSize,
-    mediaFirst: config.shopifyMediaPageSize,
-    variantsFirst: config.shopifyVariantsPageSize,
-  });
+  const fetchInput = resolveProductIndexFetchInput(config, sourceFilter);
+  const fetched = fetchInput.productGid
+    ? await fetchShopifyProductForIndex({
+        admin: input.admin,
+        productGid: fetchInput.productGid,
+        mediaFirst: config.shopifyMediaPageSize,
+        variantsFirst: config.shopifyVariantsPageSize,
+      })
+    : await fetchShopifyProductsForIndex({
+        admin: input.admin,
+        query: fetchInput.query,
+        first: fetchInput.first,
+        mediaFirst: config.shopifyMediaPageSize,
+        variantsFirst: config.shopifyVariantsPageSize,
+      });
   const job = input.jobId
     ? await input.prisma.productIndexJob.update({
         where: { id: input.jobId },
@@ -115,7 +145,45 @@ export async function runProductImageIndexJob(input: {
       });
       variantsSeen += mapped.variants.length;
       imagesSeen += mapped.images.length;
-      const product = await upsertMappedProduct({ prisma: input.prisma, mapped });
+      const product = await upsertMappedProduct({
+        prisma: input.prisma,
+        mapped,
+        onStaleIndexedImage: async (image) => {
+          if (image.milvusVectorId) {
+            await vectorStore.deleteVectorById(image.milvusVectorId);
+          }
+        },
+      });
+
+      if (mapped.product.status !== "ACTIVE") {
+        await vectorStore.deleteProductVectors({
+          shopDomain: mapped.product.shopDomain,
+          shopifyProductGid: mapped.product.shopifyProductGid,
+        });
+        await input.prisma.shopProductImage.updateMany({
+          where: { productId: product.id },
+          data: {
+            embeddingStatus: "pending",
+            milvusCollection: null,
+            milvusVectorId: null,
+            embeddingError: null,
+          },
+        });
+        imagesSkipped += mapped.images.length;
+        logger.info(
+          {
+            event: "product_index.inactive_product_vectors_deleted",
+            jobId: job.id,
+            shopDomain: mapped.product.shopDomain,
+            shopifyProductGid: mapped.product.shopifyProductGid,
+            status: mapped.product.status,
+            collectionName: vectorStore.collectionName,
+          },
+          "inactive product vectors deleted",
+        );
+        continue;
+      }
+
       const dbImages = await input.prisma.shopProductImage.findMany({
         where: { productId: product.id },
         include: { product: { include: { variants: true } } },

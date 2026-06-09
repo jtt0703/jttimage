@@ -4,12 +4,17 @@
 
   <div
     id="lenscart-ai-root"
-    class="lenscart-ai-root"
+    class="lenscart-ai-root lenscart-ai-position-{{ block.settings.button_position | escape }}"
     data-shop-domain="{{ shop.permanent_domain | escape }}"
     data-api-base-url="{{ block.settings.api_base_url | escape }}"
+    data-button-position="{{ block.settings.button_position | escape }}"
   >
     <button class="lenscart-ai-fab" type="button" data-lenscart-open>
-      <span aria-hidden="true">⌕</span>
+      <svg class="lenscart-ai-fab-icon" viewBox="1.5 3 21 18" aria-hidden="true" focusable="false">
+        <path d="M7.25 7.5 8.6 5.75h6.8l1.35 1.75H19a2.5 2.5 0 0 1 2.5 2.5v7.25A2.5 2.5 0 0 1 19 19.75H5a2.5 2.5 0 0 1-2.5-2.5V10A2.5 2.5 0 0 1 5 7.5h2.25Z"></path>
+        <circle cx="12" cy="13.1" r="4.1"></circle>
+        <circle cx="18.1" cy="10.05" r="0.75"></circle>
+      </svg>
       <span class="lenscart-ai-sr-only">Open image search</span>
     </button>
 
@@ -22,7 +27,12 @@
         </header>
         <div class="lenscart-ai-body">
           <aside class="lenscart-ai-left">
-            <div class="lenscart-ai-preview" data-lenscart-preview>Upload an image to search similar products.</div>
+            <div class="lenscart-ai-preview" data-lenscart-preview>
+              <div class="lenscart-ai-empty-art" aria-hidden="true">
+                <span></span>
+              </div>
+              <p>Drop in a product photo to find matching styles.</p>
+            </div>
             <label class="lenscart-ai-upload-button">
               Upload New Image
               <input type="file" accept="image/jpeg,image/png,image/webp" data-lenscart-file hidden>
@@ -47,6 +57,18 @@
   "target": "body",
   "settings": [
     { "type": "checkbox", "id": "enabled", "label": "Enable Image Search", "default": true },
+    {
+      "type": "select",
+      "id": "button_position",
+      "label": "Button position",
+      "default": "bottom-right",
+      "options": [
+        { "value": "bottom-right", "label": "Bottom right" },
+        { "value": "bottom-left", "label": "Bottom left" },
+        { "value": "middle-right", "label": "Middle right" },
+        { "value": "middle-left", "label": "Middle left" }
+      ]
+    },
     { "type": "text", "id": "api_base_url", "label": "API base URL", "default": "/apps/lens-cart-ai" }
   ]
 }

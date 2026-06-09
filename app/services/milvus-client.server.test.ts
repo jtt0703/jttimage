@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createMilvusVectorStore } from "./milvus-client.server";
+import { createMilvusVectorStore, MilvusUnavailableError } from "./milvus-client.server";
 
 function createFakeClient() {
   return {
@@ -62,5 +62,24 @@ describe("createMilvusVectorStore", () => {
     expect(client.search).toHaveBeenCalledWith(
       expect.objectContaining({ filter: 'shop_domain == "demo.myshopify.com" && available_for_sale == true' }),
     );
+  });
+
+  it("normalizes grpc deadline failures as Milvus unavailable", async () => {
+    const client = createFakeClient();
+    client.hasCollection.mockResolvedValue({ value: true });
+    client.loadCollectionSync.mockRejectedValue({
+      code: 4,
+      details: "Deadline exceeded after 14.999s,Waiting for LB pick",
+    });
+    const store = createMilvusVectorStore({ client, collectionName: "product_image_embeddings_512", dimension: 512 });
+
+    await expect(
+      store.search({
+        embedding: [1, ...Array(511).fill(0)],
+        shopDomain: "demo.myshopify.com",
+        limit: 12,
+        availableOnly: true,
+      }),
+    ).rejects.toBeInstanceOf(MilvusUnavailableError);
   });
 });
