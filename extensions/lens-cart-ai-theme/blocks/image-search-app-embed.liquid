@@ -6,7 +6,9 @@
     id="lenscart-ai-root"
     class="lenscart-ai-root lenscart-ai-position-{{ block.settings.button_position | escape }}"
     data-shop-domain="{{ shop.permanent_domain | escape }}"
+    data-customer-gid="{% if customer %}gid://shopify/Customer/{{ customer.id }}{% endif %}"
     data-api-base-url="{{ block.settings.api_base_url | escape }}"
+    data-wishlist-url="{{ block.settings.wishlist_url | escape }}"
     data-button-position="{{ block.settings.button_position | escape }}"
   >
     <button class="lenscart-ai-fab" type="button" data-lenscart-open>
@@ -23,7 +25,10 @@
       <section class="lenscart-ai-dialog" aria-label="Image Search">
         <header class="lenscart-ai-header">
           <h2>Image Search</h2>
-          <button type="button" data-lenscart-close>×</button>
+          <div class="lenscart-ai-header-actions">
+            <a class="lenscart-ai-header-link" href="{{ block.settings.wishlist_url | escape }}" data-lenscart-wishlist-link>Wishlist</a>
+            <button type="button" data-lenscart-close>×</button>
+          </div>
         </header>
         <div class="lenscart-ai-body">
           <aside class="lenscart-ai-left">
@@ -69,7 +74,8 @@
         { "value": "middle-left", "label": "Middle left" }
       ]
     },
-    { "type": "text", "id": "api_base_url", "label": "API base URL", "default": "/apps/lens-cart-ai" }
+    { "type": "text", "id": "api_base_url", "label": "API base URL", "default": "/apps/lens-cart-ai" },
+    { "type": "text", "id": "wishlist_url", "label": "Wishlist page URL", "default": "/apps/lens-cart-ai/wishlist" }
   ]
 }
 {% endschema %}

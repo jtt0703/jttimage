@@ -1,5 +1,5 @@
 export type IdentityType = "anonymous" | "customer";
-export type SourceSurface = "image_search" | "pdp_similar_products" | "text_search" | "cart" | "chat";
+export type SourceSurface = "image_search" | "pdp_similar_products" | "wishlist" | "text_search" | "cart" | "chat";
 export type EmbeddingStatus = "pending" | "processing" | "indexed" | "failed";
 export type ProductIndexJobStatus = "queued" | "running" | "completed" | "failed";
 export type ProductIndexMode = "incremental" | "force";

@@ -2,11 +2,13 @@
 <script src="{{ 'lens-cart-ai-storefront.js' | asset_url }}" defer></script>
 
 <section
-  class="lenscart-ai-similar"
+  class="lenscart-ai-root lenscart-ai-similar"
   data-lenscart-similar
   data-shop-domain="{{ shop.permanent_domain | escape }}"
+  data-customer-gid="{% if customer %}gid://shopify/Customer/{{ customer.id }}{% endif %}"
   data-product-gid="gid://shopify/Product/{{ product.id }}"
   data-api-base-url="{{ block.settings.api_base_url | escape }}"
+  data-wishlist-url="{{ block.settings.wishlist_url | escape }}"
   data-limit="{{ block.settings.limit }}"
 >
   <h2>{{ block.settings.heading }}</h2>
@@ -21,7 +23,8 @@
   "settings": [
     { "type": "text", "id": "heading", "label": "Heading", "default": "Similar Products" },
     { "type": "range", "id": "limit", "label": "Product count", "min": 4, "max": 12, "step": 1, "default": 8 },
-    { "type": "text", "id": "api_base_url", "label": "API base URL", "default": "/apps/lens-cart-ai" }
+    { "type": "text", "id": "api_base_url", "label": "API base URL", "default": "/apps/lens-cart-ai" },
+    { "type": "text", "id": "wishlist_url", "label": "Wishlist page URL", "default": "/apps/lens-cart-ai/wishlist" }
   ]
 }
 {% endschema %}

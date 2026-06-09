@@ -3,6 +3,8 @@
     anonymousId: "lensCartAi.v1.anonymousId",
     recentUploads: (shop) => `lensCartAi.v1.recentUploads.${shop}`,
     favorites: (shop) => `lensCartAi.v1.favoriteProducts.${shop}`,
+    favoriteProductCards: (shop) => `lensCartAi.v1.favoriteProductCards.${shop}`,
+    imageSearchState: (shop) => `lensCartAi.v1.imageSearchState.${shop}`,
   };
 
   function uuid() {
@@ -23,6 +25,12 @@
     return value;
   }
 
+  function favoriteIdentity(element) {
+    const customerGid = element && element.dataset ? element.dataset.customerGid : "";
+    if (customerGid) return { identityType: "customer", identityId: customerGid };
+    return { identityType: "anonymous", identityId: getAnonymousId() };
+  }
+
   function readJson(key, fallback) {
     try {
       return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback));
@@ -33,6 +41,74 @@
 
   function writeJson(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
+  }
+
+  function readSessionJson(key, fallback) {
+    try {
+      return JSON.parse(sessionStorage.getItem(key) || JSON.stringify(fallback));
+    } catch (_error) {
+      return fallback;
+    }
+  }
+
+  function normalizeProductForCache(product) {
+    return {
+      productGid: product.productGid,
+      variantGid: product.variantGid || null,
+      variantId: product.variantId || null,
+      title: product.title || "",
+      handle: product.handle || "",
+      imageUrl: product.imageUrl || null,
+      price: product.price || null,
+      compareAtPrice: product.compareAtPrice || null,
+      currencyCode: product.currencyCode || null,
+      availableForSale: Boolean(product.availableForSale),
+      variantTitle: product.variantTitle || null,
+      similarityScore: product.similarityScore ?? null,
+      isFavorited: true,
+    };
+  }
+
+  function favoriteProductsFromCache(shop) {
+    const favorites = readJson(keys.favorites(shop), []);
+    const cards = readJson(keys.favoriteProductCards(shop), {});
+    return favorites.map((productGid) => cards[productGid]).filter((product) => product && product.handle);
+  }
+
+  function cacheFavoriteProduct(shop, product) {
+    if (!product || !product.productGid) return;
+    const cards = readJson(keys.favoriteProductCards(shop), {});
+    cards[product.productGid] = normalizeProductForCache(product);
+    writeJson(keys.favoriteProductCards(shop), cards);
+  }
+
+  function cacheFavoriteProducts(shop, products) {
+    products.forEach((product) => {
+      if (product && product.productGid) cacheFavoriteProduct(shop, { ...product, isFavorited: true });
+    });
+  }
+
+  function removeCachedFavoriteProduct(shop, productGid) {
+    if (!productGid) return;
+    const cards = readJson(keys.favoriteProductCards(shop), {});
+    delete cards[productGid];
+    writeJson(keys.favoriteProductCards(shop), cards);
+  }
+
+  function saveImageSearchState(shop, state) {
+    try {
+      sessionStorage.setItem(keys.imageSearchState(shop), JSON.stringify({ ...state, savedAt: Date.now() }));
+    } catch (_error) {
+      // Session storage can be unavailable in strict privacy contexts.
+    }
+  }
+
+  function restoreImageSearchState(root) {
+    const shop = root.dataset.shopDomain;
+    const state = readSessionJson(keys.imageSearchState(shop), null);
+    if (!state || !state.modalOpen || !Array.isArray(state.products)) return null;
+    if (state.savedAt && Date.now() - state.savedAt > 30 * 60 * 1000) return null;
+    return state;
   }
 
   function money(product) {
@@ -52,6 +128,27 @@
       return JSON.parse(text);
     } catch (_error) {
       throw new Error("Something went wrong. Please try again.");
+    }
+  }
+
+  async function loadWishlistProducts(shop, apiBaseUrl, identity) {
+    const cachedProducts = favoriteProductsFromCache(shop);
+    try {
+      const params = new URLSearchParams({
+        shop,
+        identityType: identity.identityType,
+        identityId: identity.identityId,
+      });
+      const response = await fetch(`${apiBaseUrl}/favorites?${params}`);
+      const body = await readJsonResponse(response);
+      if (!response.ok) throw new Error(body.error || "Wishlist unavailable.");
+      const products = Array.isArray(body.products) ? body.products : [];
+      const wishlistProducts = products.length ? products : cachedProducts;
+      writeJson(keys.favorites(shop), body.favorites && body.favorites.length ? body.favorites : wishlistProducts.map((product) => product.productGid));
+      cacheFavoriteProducts(shop, products);
+      return { products: wishlistProducts, unavailable: false };
+    } catch (_error) {
+      return { products: cachedProducts, unavailable: !cachedProducts.length };
     }
   }
 
@@ -79,16 +176,34 @@
     }
   }
 
+  function productUrl(product) {
+    const root = (window.Shopify && window.Shopify.routes && window.Shopify.routes.root) || "/";
+    return `${root.replace(/\/$/, "")}/products/${product.handle}`;
+  }
+
   function isThemeEditorPreview() {
     return Boolean(window.Shopify && window.Shopify.designMode);
   }
 
+  function navigateToProduct(url) {
+    if (isThemeEditorPreview() && window.top && window.top !== window.self) {
+      try {
+        window.top.location.assign(new URL(url, window.location.href).toString());
+        return;
+      } catch (_error) {
+        window.location.assign(url);
+        return;
+      }
+    }
+    window.location.assign(url);
+  }
+
   function openProduct(product, status) {
-    if (isThemeEditorPreview()) {
-      status.textContent = "Product detail links are disabled inside the theme editor preview.";
+    if (!product.handle) {
+      status.textContent = "Product details are unavailable.";
       return;
     }
-    window.location.assign(`/products/${product.handle}`);
+    navigateToProduct(productUrl(product));
   }
 
   function renderFavoriteIcon(isFavorited) {
@@ -100,9 +215,21 @@
     `;
   }
 
-  function renderProducts(container, products, status, shop, apiBaseUrl, sourceSurface, onFindSimilar) {
+  function favoriteStatusMessage(status, isFavorited, wishlistUrl) {
+    status.textContent = isFavorited ? "Saved to favorites." : "Removed from favorites.";
+    if (!isFavorited || !wishlistUrl) return;
+    status.appendChild(document.createTextNode(" "));
+    const link = document.createElement("a");
+    link.href = wishlistUrl;
+    link.setAttribute("data-lenscart-wishlist-link", "");
+    link.textContent = "View wishlist";
+    status.appendChild(link);
+  }
+
+  function renderProducts(container, products, status, shop, apiBaseUrl, sourceSurface, onFindSimilar, wishlistUrl, identity, onFavoriteChange) {
     const favoritesKey = keys.favorites(shop);
     const favorites = new Set(readJson(favoritesKey, []));
+    const favoriteOwner = identity || { identityType: "anonymous", identityId: getAnonymousId() };
     container.innerHTML = "";
     products.forEach((product) => {
       const card = document.createElement("article");
@@ -110,15 +237,29 @@
       card.tabIndex = 0;
       card.addEventListener("click", () => openProduct(product, status));
 
+      const imageLink = document.createElement("a");
+      imageLink.className = "lenscart-ai-product-image-link";
+      imageLink.href = productUrl(product);
+      imageLink.setAttribute("aria-label", product.title);
+      imageLink.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openProduct(product, status);
+      });
       const image = document.createElement("img");
       image.src = product.imageUrl || "";
       image.alt = product.title;
-      card.appendChild(image);
+      imageLink.appendChild(image);
+      card.appendChild(imageLink);
 
       const favorite = document.createElement("button");
       favorite.type = "button";
       favorite.className = "lenscart-ai-favorite";
-      const initialFavorited = favorites.has(product.productGid) || product.isFavorited;
+      if (product.isFavorited || favorites.has(product.productGid)) {
+        favorites.add(product.productGid);
+        cacheFavoriteProduct(shop, product);
+      }
+      const initialFavorited = favorites.has(product.productGid);
       favorite.setAttribute("aria-pressed", initialFavorited ? "true" : "false");
       favorite.setAttribute("aria-label", initialFavorited ? "Remove from favorites" : "Save to favorites");
       favorite.innerHTML = renderFavoriteIcon(initialFavorited);
@@ -127,12 +268,11 @@
         const isFavorited = favorites.has(product.productGid);
         if (isFavorited) favorites.delete(product.productGid); else favorites.add(product.productGid);
         writeJson(favoritesKey, Array.from(favorites));
+        if (isFavorited) removeCachedFavoriteProduct(shop, product.productGid); else cacheFavoriteProduct(shop, product);
         favorite.setAttribute("aria-pressed", isFavorited ? "false" : "true");
         favorite.setAttribute("aria-label", isFavorited ? "Save to favorites" : "Remove from favorites");
         favorite.innerHTML = renderFavoriteIcon(!isFavorited);
-        status.textContent = isFavorited
-          ? "Removed from favorites."
-          : "Saved to favorites. Favorites are marked with a filled heart in Image Search.";
+        favoriteStatusMessage(status, !isFavorited, wishlistUrl);
         const path = isFavorited ? "/favorites/delete" : "/favorites";
         try {
           await fetch(`${apiBaseUrl}${path}`, {
@@ -140,13 +280,14 @@
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               shop,
-              identityType: "anonymous",
-              identityId: getAnonymousId(),
+              identityType: favoriteOwner.identityType,
+              identityId: favoriteOwner.identityId,
               shopifyProductGid: product.productGid,
               shopifyVariantGid: product.variantGid,
               sourceSurface,
             }),
           });
+          if (onFavoriteChange) onFavoriteChange(product, !isFavorited, card);
         } catch (_error) {
           status.textContent = "Favorite saved locally. Sync will retry next time.";
         }
@@ -154,7 +295,16 @@
       card.appendChild(favorite);
 
       const title = document.createElement("h3");
-      title.textContent = product.title;
+      const titleLink = document.createElement("a");
+      titleLink.className = "lenscart-ai-product-title-link";
+      titleLink.href = productUrl(product);
+      titleLink.textContent = product.title;
+      titleLink.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openProduct(product, status);
+      });
+      title.appendChild(titleLink);
       card.appendChild(title);
 
       const variant = document.createElement("p");
@@ -191,6 +341,8 @@
   function initImageSearch(root) {
     const shop = root.dataset.shopDomain;
     const apiBaseUrl = root.dataset.apiBaseUrl || "/apps/lens-cart-ai";
+    const wishlistUrl = root.dataset.wishlistUrl || "/apps/lens-cart-ai/wishlist";
+    const identity = favoriteIdentity(root);
     const modal = root.querySelector("[data-lenscart-modal]");
     const open = root.querySelector("[data-lenscart-open]");
     const closes = root.querySelectorAll("[data-lenscart-close]");
@@ -210,6 +362,21 @@
       }
     }
 
+    function currentPreviewImageUrl() {
+      const image = preview.querySelector("img");
+      return image ? image.src : "";
+    }
+
+    function saveCurrentImageSearchState(products) {
+      saveImageSearchState(shop, {
+        modalOpen: !modal.hidden,
+        previewImageUrl: currentPreviewImageUrl(),
+        statusText: status.textContent,
+        statusState: status.dataset.state || "",
+        products,
+      });
+    }
+
     async function searchByFile(file, previewUrl) {
       preview.innerHTML = "";
       const img = document.createElement("img");
@@ -223,6 +390,7 @@
       form.append("image", file);
       form.append("shop", shop);
       form.append("anonymousId", getAnonymousId());
+      if (identity.identityType === "customer") form.append("customerGid", identity.identityId);
       form.append("limit", "9");
       form.append("availableOnly", availableOnly.checked ? "true" : "false");
       form.append("sort", "most_relevant");
@@ -232,9 +400,10 @@
       if (!response.ok) throw new Error(body.error || "Something went wrong. Please try again.");
       const searchResults = Array.isArray(body.results) ? body.results : [];
       setModalStatus(searchResults.length ? "" : "No similar products found.");
-      renderProducts(results, searchResults, status, shop, apiBaseUrl, "image_search", findSimilarProducts);
+      renderProducts(results, searchResults, status, shop, apiBaseUrl, "image_search", findSimilarProducts, wishlistUrl, identity);
       renderRecent(body.recentUploads || []);
       writeJson(keys.favorites(shop), body.favorites || readJson(keys.favorites(shop), []));
+      saveCurrentImageSearchState(searchResults);
     }
 
     async function searchRecentUpload(item) {
@@ -266,10 +435,35 @@
         if (!response.ok) throw new Error(body.error || "Similar products unavailable.");
         const similarResults = Array.isArray(body.results) ? body.results : [];
         setModalStatus(similarResults.length ? `Showing products similar to ${product.title}.` : "No similar products found.");
-        renderProducts(results, similarResults, status, shop, apiBaseUrl, "image_search", findSimilarProducts);
+        renderProducts(results, similarResults, status, shop, apiBaseUrl, "image_search", findSimilarProducts, wishlistUrl, identity);
+        saveCurrentImageSearchState(similarResults);
       } catch (_error) {
         setModalStatus("Similar products unavailable.");
       }
+    }
+
+    async function renderWishlistProducts() {
+      modal.hidden = false;
+      setModalStatus("Loading saved products…", "loading");
+      results.innerHTML = "";
+      const { products } = await loadWishlistProducts(shop, apiBaseUrl, identity);
+      setModalStatus(products.length ? "Showing saved products." : "No saved products yet.");
+      renderProducts(
+        results,
+        products,
+        status,
+        shop,
+        apiBaseUrl,
+        "wishlist",
+        null,
+        wishlistUrl,
+        identity,
+        (_product, isFavorited, card) => {
+          if (isFavorited) return;
+          card.remove();
+          if (!results.children.length) setModalStatus("No saved products yet.");
+        },
+      );
     }
 
     function renderRecent(items) {
@@ -288,9 +482,45 @@
       });
     }
 
-    open.addEventListener("click", () => { modal.hidden = false; });
-    closes.forEach((button) => button.addEventListener("click", () => { modal.hidden = true; }));
+    root.addEventListener("click", (event) => {
+      const target = event.target;
+      const wishlistLink = target && target.closest ? target.closest("[data-lenscart-wishlist-link]") : null;
+      if (!wishlistLink || !root.contains(wishlistLink)) return;
+      event.preventDefault();
+      renderWishlistProducts();
+    });
+    open.addEventListener("click", () => {
+      modal.hidden = false;
+      const restoredProducts = Array.from(results.children).length ? null : restoreImageSearchState(root);
+      if (!restoredProducts) return;
+      if (restoredProducts.previewImageUrl) {
+        preview.innerHTML = "";
+        const img = document.createElement("img");
+        img.src = restoredProducts.previewImageUrl;
+        img.alt = "Uploaded image preview";
+        preview.appendChild(img);
+      }
+      setModalStatus(restoredProducts.statusText || "", restoredProducts.statusState || undefined);
+      renderProducts(results, restoredProducts.products, status, shop, apiBaseUrl, "image_search", findSimilarProducts, wishlistUrl, identity);
+    });
+    closes.forEach((button) => button.addEventListener("click", () => {
+      modal.hidden = true;
+      saveImageSearchState(shop, { modalOpen: false, products: [] });
+    }));
     renderRecent(readJson(keys.recentUploads(shop), []));
+    const restoredState = restoreImageSearchState(root);
+    if (restoredState) {
+      modal.hidden = false;
+      if (restoredState.previewImageUrl) {
+        preview.innerHTML = "";
+        const img = document.createElement("img");
+        img.src = restoredState.previewImageUrl;
+        img.alt = "Uploaded image preview";
+        preview.appendChild(img);
+      }
+      setModalStatus(restoredState.statusText || "", restoredState.statusState || undefined);
+      renderProducts(results, restoredState.products, status, shop, apiBaseUrl, "image_search", findSimilarProducts, wishlistUrl, identity);
+    }
 
     fileInput.addEventListener("change", async () => {
       const file = fileInput.files && fileInput.files[0];
@@ -315,6 +545,8 @@
     const shop = section.dataset.shopDomain;
     const productGid = section.dataset.productGid;
     const apiBaseUrl = section.dataset.apiBaseUrl || "/apps/lens-cart-ai";
+    const wishlistUrl = section.dataset.wishlistUrl || "/apps/lens-cart-ai/wishlist";
+    const identity = favoriteIdentity(section);
     const limit = section.dataset.limit || "8";
     const status = section.querySelector("[data-lenscart-similar-status]");
     const results = section.querySelector("[data-lenscart-similar-results]");
@@ -327,7 +559,7 @@
         if (!response.ok) throw new Error(body.error || "Similar products unavailable.");
         const similarResults = Array.isArray(body.results) ? body.results : [];
         status.textContent = similarResults.length ? "" : "Similar products unavailable.";
-        renderProducts(results, similarResults, status, shop, apiBaseUrl, "pdp_similar_products", findSimilarProducts);
+        renderProducts(results, similarResults, status, shop, apiBaseUrl, "pdp_similar_products", findSimilarProducts, wishlistUrl, identity);
       } catch (_error) {
         status.textContent = "Similar products unavailable.";
       }
@@ -344,14 +576,57 @@
         return;
       }
       status.textContent = "";
-      renderProducts(results, similarResults, status, shop, apiBaseUrl, "pdp_similar_products", findSimilarProducts);
+      renderProducts(results, similarResults, status, shop, apiBaseUrl, "pdp_similar_products", findSimilarProducts, wishlistUrl, identity);
     } catch (_error) {
       status.textContent = "Similar products unavailable.";
+    }
+  }
+
+  async function initWishlist(section) {
+    const shop = section.dataset.shopDomain;
+    const apiBaseUrl = section.dataset.apiBaseUrl || "/apps/lens-cart-ai";
+    const wishlistUrl = section.dataset.wishlistUrl || "/apps/lens-cart-ai/wishlist";
+    const identity = favoriteIdentity(section);
+    const status = section.querySelector("[data-lenscart-wishlist-status]");
+    const results = section.querySelector("[data-lenscart-wishlist-results]");
+
+    function setWishlistStatus(message, state) {
+      status.textContent = message;
+      if (state) {
+        status.dataset.state = state;
+      } else {
+        delete status.dataset.state;
+      }
+    }
+
+    try {
+      setWishlistStatus("Loading saved products…", "loading");
+      const { products } = await loadWishlistProducts(shop, apiBaseUrl, identity);
+      setWishlistStatus(products.length ? "" : "No saved products yet.");
+      renderProducts(
+        results,
+        products,
+        status,
+        shop,
+        apiBaseUrl,
+        "wishlist",
+        null,
+        wishlistUrl,
+        identity,
+        (_product, isFavorited, card) => {
+          if (isFavorited) return;
+          card.remove();
+          if (!results.children.length) setWishlistStatus("No saved products yet.");
+        },
+      );
+    } catch (_error) {
+      setWishlistStatus("No saved products yet.");
     }
   }
 
   document.addEventListener("DOMContentLoaded", () => {
     document.querySelectorAll("[data-lenscart-open]").forEach((button) => initImageSearch(button.closest("[data-shop-domain]")));
     document.querySelectorAll("[data-lenscart-similar]").forEach(initSimilarProducts);
+    document.querySelectorAll("[data-lenscart-wishlist]").forEach(initWishlist);
   });
 })();

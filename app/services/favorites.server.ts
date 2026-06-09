@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
-import type { IdentityType, SourceSurface } from "../lib/image-search/types";
+import { buildProductCardDTO } from "../lib/image-search/product-card.server";
+import type { IdentityType, ProductCardDTO, SourceSurface } from "../lib/image-search/types";
 
 export async function listFavoriteProductGids(input: {
   prisma: PrismaClient;
@@ -12,6 +13,42 @@ export async function listFavoriteProductGids(input: {
     orderBy: { createdAt: "desc" },
   });
   return rows.map((row) => row.shopifyProductGid);
+}
+
+export async function listFavoriteProducts(input: {
+  prisma: PrismaClient;
+  shopDomain: string;
+  identityType: IdentityType;
+  identityId: string;
+}): Promise<{ favorites: string[]; products: ProductCardDTO[] }> {
+  const favorites = await listFavoriteProductGids(input);
+  if (!favorites.length) return { favorites, products: [] };
+
+  const products = await input.prisma.shopProduct.findMany({
+    where: {
+      shopDomain: input.shopDomain,
+      shopifyProductGid: { in: favorites },
+      status: "ACTIVE",
+    },
+    include: { variants: true, images: true },
+  });
+  const productByGid = new Map(products.map((product) => [product.shopifyProductGid, product]));
+  const cards = favorites
+    .map((productGid) => {
+      const product = productByGid.get(productGid);
+      if (!product) return null;
+      const image = product.images.find((item) => item.isFeatured) ?? product.images[0];
+      return buildProductCardDTO({
+        product,
+        variants: product.variants,
+        imageUrl: image?.imageUrl ?? product.featuredImageUrl,
+        similarityScore: null,
+        isFavorited: true,
+      });
+    })
+    .filter((value): value is ProductCardDTO => Boolean(value));
+
+  return { favorites, products: cards };
 }
 
 export async function addFavorite(input: {

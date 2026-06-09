@@ -150,6 +150,25 @@
   font-weight: 600;
 }
 
+.lenscart-ai-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lenscart-ai-header-link {
+  color: var(--lenscart-ai-ink);
+  font-size: 14px;
+  line-height: 1.2;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.lenscart-ai-header-link:hover,
+.lenscart-ai-header-link:focus-visible {
+  color: var(--lenscart-ai-accent);
+}
+
 .lenscart-ai-header button {
   width: 36px;
   height: 36px;
@@ -341,6 +360,12 @@
   font-size: 14px;
 }
 
+.lenscart-ai-status a {
+  color: var(--lenscart-ai-ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .lenscart-ai-status[data-state="loading"] {
   display: inline-flex;
   align-items: center;
@@ -403,10 +428,20 @@
   border-color: #cbd5e1;
 }
 
-.lenscart-ai-card > img {
+.lenscart-ai-product-image-link {
+  display: block;
   aspect-ratio: 1;
+  overflow: hidden;
   border-radius: 12px;
   background: var(--lenscart-ai-soft);
+  color: inherit;
+  text-decoration: none;
+}
+
+.lenscart-ai-product-image-link img {
+  display: block;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
 }
 
@@ -415,6 +450,17 @@
   font-size: 14px;
   line-height: 1.3;
   font-weight: 600;
+}
+
+.lenscart-ai-product-title-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.lenscart-ai-product-title-link:hover,
+.lenscart-ai-product-title-link:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .lenscart-ai-card p {
@@ -484,6 +530,31 @@
   margin: 32px 0;
 }
 
+.lenscart-ai-wishlist {
+  max-width: 1180px;
+  margin: 32px auto;
+  padding: 0 20px;
+}
+
+.lenscart-ai-wishlist-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.lenscart-ai-wishlist-header h2 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.15;
+  font-weight: 650;
+}
+
+.lenscart-ai-wishlist .lenscart-ai-grid {
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+}
+
 @media (max-width: 760px) {
   .lenscart-ai-position-bottom-right .lenscart-ai-fab,
   .lenscart-ai-position-middle-right .lenscart-ai-fab {
@@ -523,5 +594,10 @@
 
   .lenscart-ai-body {
     grid-template-columns: 1fr;
+  }
+
+  .lenscart-ai-wishlist-header {
+    align-items: start;
+    flex-direction: column;
   }
 }

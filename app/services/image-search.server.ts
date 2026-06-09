@@ -270,16 +270,16 @@ export async function runImageSearch(input: {
         candidateProductGids: candidateHits.map((hit) => hit.shopifyProductGid),
       };
     });
-	    const favoriteGids = await timing.measure("favoriteLookupMs", () =>
-	      listFavoriteProductGids({
-	        prisma: input.prisma,
-	        shopDomain: input.shopDomain,
-	        identityType: input.customerGid ? "customer" : "anonymous",
-	        identityId: input.customerGid ?? input.anonymousId,
-	      }),
-	    );
+    const favoriteGids = await timing.measure("favoriteLookupMs", () =>
+      listFavoriteProductGids({
+        prisma: input.prisma,
+        shopDomain: input.shopDomain,
+        identityType: input.customerGid ? "customer" : "anonymous",
+        identityId: input.customerGid ?? input.anonymousId,
+      }),
+    );
 
-	    const products = await timing.measure("productLookupMs", () =>
+    const products = await timing.measure("productLookupMs", () =>
       input.prisma.shopProduct.findMany({
         where: {
           shopDomain: input.shopDomain,

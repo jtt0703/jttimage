@@ -1,0 +1,27 @@
+{{ 'lens-cart-ai.css' | asset_url | stylesheet_tag }}
+<script src="{{ 'lens-cart-ai-storefront.js' | asset_url }}" defer></script>
+
+<section
+  class="lenscart-ai-root lenscart-ai-wishlist"
+  data-lenscart-wishlist
+  data-shop-domain="{{ shop.permanent_domain | escape }}"
+  data-customer-gid="{% if customer %}gid://shopify/Customer/{{ customer.id }}{% endif %}"
+  data-api-base-url="{{ block.settings.api_base_url | escape }}"
+>
+  <header class="lenscart-ai-wishlist-header">
+    <h2>{{ block.settings.heading }}</h2>
+    <div class="lenscart-ai-status" data-lenscart-wishlist-status>Loading saved products…</div>
+  </header>
+  <div class="lenscart-ai-grid" data-lenscart-wishlist-results></div>
+</section>
+
+{% schema %}
+{
+  "name": "LensCart Wishlist",
+  "target": "section",
+  "settings": [
+    { "type": "text", "id": "heading", "label": "Heading", "default": "Wishlist" },
+    { "type": "text", "id": "api_base_url", "label": "API base URL", "default": "/apps/lens-cart-ai" }
+  ]
+}
+{% endschema %}

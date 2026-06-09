@@ -6,7 +6,7 @@ import {
   validateShopDomain,
   verifyShopifyProxySignature,
 } from "../lib/image-search/validation.server";
-import { addFavorite, listFavoriteProductGids } from "../services/favorites.server";
+import { addFavorite, listFavoriteProducts } from "../services/favorites.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
@@ -17,8 +17,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     identityType: url.searchParams.get("identityType"),
     identityId: url.searchParams.get("identityId"),
   });
-  const favorites = await listFavoriteProductGids({ prisma, shopDomain, ...identity });
-  return Response.json({ favorites });
+  const result = await listFavoriteProducts({ prisma, shopDomain, ...identity });
+  return Response.json(result);
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
