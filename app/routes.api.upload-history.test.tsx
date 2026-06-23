@@ -1,9 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { loader } from "./routes/api.recommendations.similar-products";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loader } from "./routes/api.upload-history";
 
 const mocks = vi.hoisted(() => ({
   findSession: vi.fn(),
-  getSimilarProducts: vi.fn(),
+  listRecentUploads: vi.fn(),
   requireBillingAccess: vi.fn(),
 }));
 
@@ -15,8 +15,8 @@ vi.mock("./db.server", () => ({
   },
 }));
 
-vi.mock("./services/recommendations.server", () => ({
-  getSimilarProducts: mocks.getSimilarProducts,
+vi.mock("./services/upload-history.server", () => ({
+  listRecentUploads: mocks.listRecentUploads,
 }));
 
 vi.mock("./services/billing.server", async () => {
@@ -27,38 +27,40 @@ vi.mock("./services/billing.server", async () => {
   };
 });
 
-function loaderArgs(requestUrl: string) {
+function loaderArgs(requestUrl: string, init?: RequestInit) {
   const url = new URL(requestUrl);
   return {
-    request: new Request(url),
+    request: new Request(url, init),
     url,
-    pattern: "/api/recommendations/similar-products",
+    pattern: "/api/upload-history",
     params: {},
     context: {},
   };
 }
 
-describe("similar products route", () => {
+describe("upload history route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.findSession.mockResolvedValue({ id: "session-1", shop: "demo-shop.myshopify.com" });
-    mocks.getSimilarProducts.mockResolvedValue({ products: [] });
+    mocks.listRecentUploads.mockResolvedValue([]);
     mocks.requireBillingAccess.mockResolvedValue({});
   });
 
-  it("returns a 503 json response when the recommendations dependency fails", async () => {
-    mocks.getSimilarProducts.mockRejectedValue(new Error("Milvus unavailable"));
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("allows configured storefront origins when returning recent uploads", async () => {
+    vi.stubEnv("STOREFRONT_CORS_ORIGINS", "https://test-klaehgez.myshopify.com");
 
     const response = await loader(
       loaderArgs(
-        "http://localhost/api/recommendations/similar-products?shop=demo-shop.myshopify.com&productGid=gid://shopify/Product/1",
+        "http://localhost/api/upload-history?shop=demo-shop.myshopify.com&anonymousId=4b77dc6e-2ba1-4bd6-a081-e541eb944f64",
+        { headers: { Origin: "https://test-klaehgez.myshopify.com" } },
       ),
     );
 
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toEqual({
-      error: "Similar products are temporarily unavailable. Please try again later.",
-    });
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://test-klaehgez.myshopify.com");
   });
 
   it("returns 402 when shop is installed but billing is inactive", async () => {
@@ -66,9 +68,7 @@ describe("similar products route", () => {
     mocks.requireBillingAccess.mockRejectedValue(new BillingAccessError());
 
     const response = await loader(
-      loaderArgs(
-        "http://localhost/api/recommendations/similar-products?shop=demo-shop.myshopify.com&productGid=gid://shopify/Product/1",
-      ),
+      loaderArgs("http://localhost/api/upload-history?shop=demo-shop.myshopify.com&anonymousId=4b77dc6e-2ba1-4bd6-a081-e541eb944f64"),
     );
 
     expect(response.status).toBe(402);
@@ -77,6 +77,6 @@ describe("similar products route", () => {
       code: "billing_required",
       plan: "Starter",
     });
-    expect(mocks.getSimilarProducts).not.toHaveBeenCalled();
+    expect(mocks.listRecentUploads).not.toHaveBeenCalled();
   });
 });

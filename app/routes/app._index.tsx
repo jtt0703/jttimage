@@ -1,10 +1,12 @@
 import { useEffect } from "react";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useFetcher, useLoaderData } from "react-router";
+import { redirect, useFetcher, useLoaderData } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
+import { redirectWithCurrentSearch } from "../lib/redirect.server";
 import { authenticate } from "../shopify.server";
+import { BillingAccessError, requireBillingAccess } from "../services/billing.server";
 
 type IndexJobActionResult = {
   jobId?: string;
@@ -13,7 +15,14 @@ type IndexJobActionResult = {
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
+  try {
+    await requireBillingAccess({ prisma, admin, shopDomain: session.shop });
+  } catch (error) {
+    if (error instanceof BillingAccessError) throw redirect(redirectWithCurrentSearch(request, "/app/billing"));
+    throw error;
+  }
+
   const [lastJob, totalImages, indexedImages, pendingImages] = await Promise.all([
     prisma.productIndexJob.findFirst({
       where: { shopDomain: session.shop },

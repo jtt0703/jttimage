@@ -7,6 +7,7 @@ import {
   verifyShopifyProxySignature,
 } from "../lib/image-search/validation.server";
 import { errorLogFields, logger } from "../lib/logger.server";
+import { billingAccessErrorResponse, requireBillingAccess } from "../services/billing.server";
 import { getSimilarProducts } from "../services/recommendations.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -20,6 +21,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
     const installedSession = await prisma.session.findFirst({ where: { shop: shopDomain } });
     if (!installedSession) return Response.json({ error: "Shop is not installed" }, { status: 403 });
+
+    try {
+      await requireBillingAccess({ prisma, shopDomain });
+    } catch (error) {
+      const billingResponse = billingAccessErrorResponse(error);
+      if (billingResponse) return billingResponse;
+      throw error;
+    }
 
     const productGid = url.searchParams.get("productGid");
     if (!productGid?.startsWith("gid://shopify/Product/")) {

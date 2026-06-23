@@ -52,6 +52,8 @@ Fields:
 - `activeSubscriptionId`
 - `subscriptionStatus`
 - `subscriptionTest`
+- `subscriptionCreatedAt`
+- `currentPeriodEnd`
 - `lastCheckedAt`
 - `createdAt`
 - `updatedAt`
@@ -65,7 +67,9 @@ Indexes:
 Important behavior:
 
 - `trialUsed` starts as `false`.
-- `trialUsed` changes to `true` only after Shopify confirms an active subscription that was created with trial days.
+- `trialUsed` changes to `true` only after Shopify confirms an active subscription whose `trialDays` is greater than zero for this app plan.
+- If `appSubscriptionCreate` returns a confirmation URL but the merchant abandons confirmation, `trialUsed` remains `false`.
+- When Shopify reports no active subscription for the configured plan, clear `activeSubscriptionId`, set `subscriptionStatus` to `inactive`, and keep the trial history fields unchanged.
 - `ShopBillingState` must not be deleted on app uninstall.
 - If the merchant cancels, uninstalls, reinstalls, or subscribes again later, `trialUsed=true` means no second trial.
 
@@ -152,7 +156,8 @@ Do not enforce entitlement in:
 Storefront response behavior:
 
 - If shop is not installed: keep current `403`.
-- If shop is installed but not subscribed: return `402` with `{ "error": "Lens Search is not active for this store." }`.
+- If shop is installed but not subscribed: JSON storefront API routes return `402` with `{ "error": "Lens Search is not active for this store." }`.
+- The app-proxy wishlist page route (`app/routes/api.wishlist.tsx`) returns a small friendly HTML unavailable page with status `402`, not raw JSON, because it is opened directly as a storefront page.
 - The theme extension should show a friendly unavailable status instead of raw JSON or parse errors.
 
 ## Webhook Behavior
@@ -176,6 +181,8 @@ BILLING_TRIAL_DAYS=14
 BILLING_ENTITLEMENT_CACHE_SECONDS=300
 ```
 
+`BILLING_MONTHLY_PRICE` is intentionally `7.99`; this is the confirmed launch price.
+
 Production:
 
 ```env
@@ -195,7 +202,9 @@ Unit tests:
 - Trial eligibility returns 14 days only before `trialUsed=true`.
 - Trial eligibility returns no trial after `trialUsed=true`.
 - Active Shopify subscription creates an entitled result.
-- Missing subscription creates a not-entitled result.
+- Missing subscription clears `activeSubscriptionId` and creates a not-entitled result.
+- Confirmed active subscription with `trialDays > 0` sets `trialUsed=true`.
+- Abandoned confirmation URL does not set `trialUsed=true`.
 - Billing state is not deleted on uninstall.
 
 Route tests:

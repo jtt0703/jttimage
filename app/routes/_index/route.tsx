@@ -19,18 +19,24 @@ export default function App() {
   const { showForm } = useLoaderData<typeof loader>();
 
   return (
-    <div className={styles.index}>
-      <div className={styles.content}>
-        <h1 className={styles.heading}>A short heading about [your app]</h1>
+    <main className={styles.index}>
+      <section className={styles.content}>
+        <p className={styles.eyebrow}>Lens Search</p>
+        <h1 className={styles.heading}>AI image search for Shopify storefronts</h1>
         <p className={styles.text}>
-          A tagline about [your app] that describes your value proposition.
+          Upload an image, find matching products, and save favorites from a
+          Shopify storefront experience.
         </p>
         {showForm && (
           <Form className={styles.form} method="post" action="/auth/login">
             <label className={styles.label}>
               <span>Shop domain</span>
-              <input className={styles.input} type="text" name="shop" />
-              <span>e.g: my-shop-domain.myshopify.com</span>
+              <input
+                className={styles.input}
+                type="text"
+                name="shop"
+                placeholder="example.myshopify.com"
+              />
             </label>
             <button className={styles.button} type="submit">
               Log in
@@ -38,20 +44,11 @@ export default function App() {
           </Form>
         )}
         <ul className={styles.list}>
-          <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
-          </li>
-          <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
-          </li>
-          <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
-          </li>
+          <li>Image-based product discovery</li>
+          <li>Storefront favorites and upload history</li>
+          <li>Background product indexing from Shopify webhooks</li>
         </ul>
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }

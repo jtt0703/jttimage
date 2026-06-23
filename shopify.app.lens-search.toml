@@ -1,0 +1,57 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "6d25e60dbb06b6811c827e94c88add91"
+name = "Lens Search"
+application_url = "https://search.pagelumo.com"
+embedded = true
+
+[access_scopes]
+scopes = "write_products,write_metaobjects,write_metaobject_definitions,write_app_proxy"
+optional_scopes = [ ]
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [ "https://search.pagelumo.com/auth/callback" ]
+
+[webhooks]
+api_version = "2026-07"
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/uninstalled"
+  topics = [ "app/uninstalled" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/scopes_update"
+  topics = [ "app/scopes_update" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/customers/data_request"
+  compliance_topics = [ "customers/data_request" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/customers/redact"
+  compliance_topics = [ "customers/redact" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/shop/redact"
+  compliance_topics = [ "shop/redact" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/products/create"
+  topics = [ "products/create" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/products/update"
+  topics = [ "products/update" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/products/delete"
+  topics = [ "products/delete" ]
+
+[app_proxy]
+url = "/api"
+prefix = "apps"
+subpath = "lens-cart-ai"
+
+[build]
+automatically_update_urls_on_dev = true

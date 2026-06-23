@@ -131,6 +131,17 @@
     }
   }
 
+  function errorMessageFromResponse(response, body, fallback) {
+    if (response.status === 402) return body.error || "Lens Search is not active for this store.";
+    return body.error || fallback;
+  }
+
+  function responseErrorFromResponse(response, body, fallback) {
+    const error = new Error(errorMessageFromResponse(response, body, fallback));
+    error.status = response.status;
+    return error;
+  }
+
   async function loadWishlistProducts(shop, apiBaseUrl, identity) {
     const cachedProducts = favoriteProductsFromCache(shop);
     try {
@@ -141,13 +152,14 @@
       });
       const response = await fetch(`${apiBaseUrl}/favorites?${params}`);
       const body = await readJsonResponse(response);
-      if (!response.ok) throw new Error(body.error || "Wishlist unavailable.");
+      if (!response.ok) throw responseErrorFromResponse(response, body, "Wishlist unavailable.");
       const products = Array.isArray(body.products) ? body.products : [];
       const wishlistProducts = products.length ? products : cachedProducts;
       writeJson(keys.favorites(shop), body.favorites && body.favorites.length ? body.favorites : wishlistProducts.map((product) => product.productGid));
       cacheFavoriteProducts(shop, products);
       return { products: wishlistProducts, unavailable: false };
-    } catch (_error) {
+    } catch (error) {
+      if (error && error.status === 402) throw error;
       return { products: cachedProducts, unavailable: !cachedProducts.length };
     }
   }
@@ -275,7 +287,7 @@
         favoriteStatusMessage(status, !isFavorited, wishlistUrl);
         const path = isFavorited ? "/favorites/delete" : "/favorites";
         try {
-          await fetch(`${apiBaseUrl}${path}`, {
+          const response = await fetch(`${apiBaseUrl}${path}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -287,9 +299,11 @@
               sourceSurface,
             }),
           });
+          const body = await readJsonResponse(response);
+          if (!response.ok) throw responseErrorFromResponse(response, body, "Favorite saved locally. Sync will retry next time.");
           if (onFavoriteChange) onFavoriteChange(product, !isFavorited, card);
-        } catch (_error) {
-          status.textContent = "Favorite saved locally. Sync will retry next time.";
+        } catch (error) {
+          status.textContent = error && error.status === 402 && error.message ? error.message : "Favorite saved locally. Sync will retry next time.";
         }
       });
       card.appendChild(favorite);
@@ -397,7 +411,7 @@
 
       const response = await fetch(`${apiBaseUrl}/image-search/search`, { method: "POST", body: form });
       const body = await readJsonResponse(response);
-      if (!response.ok) throw new Error(body.error || "Something went wrong. Please try again.");
+      if (!response.ok) throw responseErrorFromResponse(response, body, "Something went wrong. Please try again.");
       const searchResults = Array.isArray(body.results) ? body.results : [];
       setModalStatus(searchResults.length ? "" : "No similar products found.");
       renderProducts(results, searchResults, status, shop, apiBaseUrl, "image_search", findSimilarProducts, wishlistUrl, identity);
@@ -432,38 +446,42 @@
         });
         const response = await fetch(`${apiBaseUrl}/recommendations/similar-products?${params}`);
         const body = await readJsonResponse(response);
-        if (!response.ok) throw new Error(body.error || "Similar products unavailable.");
+        if (!response.ok) throw responseErrorFromResponse(response, body, "Similar products unavailable.");
         const similarResults = Array.isArray(body.results) ? body.results : [];
         setModalStatus(similarResults.length ? `Showing products similar to ${product.title}.` : "No similar products found.");
         renderProducts(results, similarResults, status, shop, apiBaseUrl, "image_search", findSimilarProducts, wishlistUrl, identity);
         saveCurrentImageSearchState(similarResults);
-      } catch (_error) {
-        setModalStatus("Similar products unavailable.");
+      } catch (error) {
+        setModalStatus(error && error.message ? error.message : "Similar products unavailable.");
       }
     }
 
     async function renderWishlistProducts() {
-      modal.hidden = false;
-      setModalStatus("Loading saved products…", "loading");
-      results.innerHTML = "";
-      const { products } = await loadWishlistProducts(shop, apiBaseUrl, identity);
-      setModalStatus(products.length ? "Showing saved products." : "No saved products yet.");
-      renderProducts(
-        results,
-        products,
-        status,
-        shop,
-        apiBaseUrl,
-        "wishlist",
-        null,
-        wishlistUrl,
-        identity,
-        (_product, isFavorited, card) => {
-          if (isFavorited) return;
-          card.remove();
-          if (!results.children.length) setModalStatus("No saved products yet.");
-        },
-      );
+      try {
+        modal.hidden = false;
+        setModalStatus("Loading saved products…", "loading");
+        results.innerHTML = "";
+        const { products } = await loadWishlistProducts(shop, apiBaseUrl, identity);
+        setModalStatus(products.length ? "Showing saved products." : "No saved products yet.");
+        renderProducts(
+          results,
+          products,
+          status,
+          shop,
+          apiBaseUrl,
+          "wishlist",
+          null,
+          wishlistUrl,
+          identity,
+          (_product, isFavorited, card) => {
+            if (isFavorited) return;
+            card.remove();
+            if (!results.children.length) setModalStatus("No saved products yet.");
+          },
+        );
+      } catch (error) {
+        setModalStatus(error && error.message ? error.message : "Wishlist unavailable.");
+      }
     }
 
     function renderRecent(items) {
@@ -556,12 +574,12 @@
         const params = new URLSearchParams({ shop, productGid: product.productGid, anonymousId: getAnonymousId(), limit, availableOnly: "true" });
         const response = await fetch(`${apiBaseUrl}/recommendations/similar-products?${params}`);
         const body = await readJsonResponse(response);
-        if (!response.ok) throw new Error(body.error || "Similar products unavailable.");
+        if (!response.ok) throw responseErrorFromResponse(response, body, "Similar products unavailable.");
         const similarResults = Array.isArray(body.results) ? body.results : [];
         status.textContent = similarResults.length ? "" : "Similar products unavailable.";
         renderProducts(results, similarResults, status, shop, apiBaseUrl, "pdp_similar_products", findSimilarProducts, wishlistUrl, identity);
-      } catch (_error) {
-        status.textContent = "Similar products unavailable.";
+      } catch (error) {
+        status.textContent = error && error.message ? error.message : "Similar products unavailable.";
       }
     }
 
@@ -569,7 +587,7 @@
       const params = new URLSearchParams({ shop, productGid, anonymousId: getAnonymousId(), limit, availableOnly: "true" });
       const response = await fetch(`${apiBaseUrl}/recommendations/similar-products?${params}`);
       const body = await readJsonResponse(response);
-      if (!response.ok) throw new Error(body.error || "Similar products unavailable.");
+      if (!response.ok) throw responseErrorFromResponse(response, body, "Similar products unavailable.");
       const similarResults = Array.isArray(body.results) ? body.results : [];
       if (!similarResults.length) {
         section.hidden = true;
@@ -577,8 +595,8 @@
       }
       status.textContent = "";
       renderProducts(results, similarResults, status, shop, apiBaseUrl, "pdp_similar_products", findSimilarProducts, wishlistUrl, identity);
-    } catch (_error) {
-      status.textContent = "Similar products unavailable.";
+    } catch (error) {
+      status.textContent = error && error.message ? error.message : "Similar products unavailable.";
     }
   }
 
@@ -619,8 +637,8 @@
           if (!results.children.length) setWishlistStatus("No saved products yet.");
         },
       );
-    } catch (_error) {
-      setWishlistStatus("No saved products yet.");
+    } catch (error) {
+      setWishlistStatus(error && error.message ? error.message : "No saved products yet.");
     }
   }
 

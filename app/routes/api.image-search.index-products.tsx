@@ -3,10 +3,19 @@ import prisma from "../db.server";
 import { logger } from "../lib/logger.server";
 import { getImageSearchConfig } from "../lib/image-search/env.server";
 import { authenticate } from "../shopify.server";
+import { billingAccessErrorResponse, requireBillingAccess } from "../services/billing.server";
 import { enqueueProductImageIndexJob } from "../services/job-queue.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
+  try {
+    await requireBillingAccess({ prisma, admin, shopDomain: session.shop });
+  } catch (error) {
+    const billingResponse = billingAccessErrorResponse(error);
+    if (billingResponse) return billingResponse;
+    throw error;
+  }
+
   const body = await request.json().catch(() => ({}));
   const mode = body.mode === "force" ? "force" : "incremental";
   const config = getImageSearchConfig();

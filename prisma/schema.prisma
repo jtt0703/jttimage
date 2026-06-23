@@ -27,6 +27,27 @@ model Session {
   refreshTokenExpires DateTime?
 }
 
+model ShopBillingState {
+  id                    String    @id @default(uuid())
+  shopDomain            String    @unique @map("shop_domain")
+  planName              String    @map("plan_name")
+  trialUsed             Boolean   @default(false) @map("trial_used")
+  trialStartedAt        DateTime? @map("trial_started_at")
+  trialEndedAt          DateTime? @map("trial_ended_at")
+  activeSubscriptionId  String?   @map("active_subscription_id")
+  subscriptionStatus    String    @default("inactive") @map("subscription_status")
+  subscriptionTest      Boolean?  @map("subscription_test")
+  subscriptionCreatedAt DateTime? @map("subscription_created_at")
+  currentPeriodEnd      DateTime? @map("current_period_end")
+  lastCheckedAt         DateTime? @map("last_checked_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@index([subscriptionStatus])
+  @@index([lastCheckedAt])
+  @@map("shop_billing_states")
+}
+
 model ShopProduct {
   id                String               @id @default(uuid())
   shopDomain        String               @map("shop_domain")

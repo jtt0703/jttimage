@@ -1,9 +1,19 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { redirect } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
+import prisma from "../db.server";
+import { redirectWithCurrentSearch } from "../lib/redirect.server";
 import { authenticate } from "../shopify.server";
+import { BillingAccessError, requireBillingAccess } from "../services/billing.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
+  try {
+    await requireBillingAccess({ prisma, admin, shopDomain: session.shop });
+  } catch (error) {
+    if (error instanceof BillingAccessError) throw redirect(redirectWithCurrentSearch(request, "/app/billing"));
+    throw error;
+  }
 
   return null;
 };
