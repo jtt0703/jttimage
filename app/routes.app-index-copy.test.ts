@@ -102,6 +102,15 @@ describe("app index copy", () => {
     expect(normalizedSource).toContain("Index job queued. Refresh this page in a moment to see updated counts.");
   });
 
+  it("separates storefront embed readiness from billing API readiness in review copy", () => {
+    const source = readFileSync(join(process.cwd(), "app/routes/app._index.tsx"), "utf8");
+    const normalizedSource = source.replace(/\s+/g, " ");
+
+    expect(normalizedSource).toContain("Storefront API billing: Active");
+    expect(normalizedSource).toContain("Camera button visible means the Theme App Embed is loaded.");
+    expect(normalizedSource).toContain("A 402 response means billing/API access is inactive, not that the embed is missing.");
+  });
+
   it("redirects app index to billing with embedded Shopify query params when billing is inactive", async () => {
     const { BillingAccessError } = await import("./services/billing.server");
     mocks.requireBillingAccess.mockRejectedValue(new BillingAccessError());

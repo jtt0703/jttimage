@@ -68,6 +68,7 @@ describe("wishlist app proxy route", () => {
 
     expect(response.status).toBe(402);
     expect(response.headers.get("content-type")).toContain("text/html");
-    expect(html).toContain("Lens Search is not active for this store.");
+    expect(html).toContain("Lens Search billing is not active for this store.");
+    expect(html).toContain("The storefront embed may still be loaded; billing/API access is blocked.");
   });
 });

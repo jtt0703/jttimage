@@ -57,8 +57,9 @@ export default function BillingPage() {
       const idToken = await shopify.idToken();
       const body = new FormData();
       body.set("intent", "start_subscription");
+      const billingActionUrl = `/app/billing${window.location.search}`;
 
-      const response = await fetch("/app/billing", {
+      const response = await fetch(billingActionUrl, {
         method: "POST",
         headers: { Authorization: `Bearer ${idToken}` },
         body,

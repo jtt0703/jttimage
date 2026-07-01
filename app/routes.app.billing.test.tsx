@@ -87,6 +87,7 @@ describe("billing page route", () => {
 
     expect(source).toContain('import { useAppBridge } from "@shopify/app-bridge-react";');
     expect(source).toContain("await shopify.idToken()");
+    expect(source).toContain("window.location.search");
     expect(source).toContain('Authorization: `Bearer ${idToken}`');
     expect(source).toContain('window.open(redirectUrl, "_top")');
     expect(source).not.toContain("reloadDocument");
@@ -106,9 +107,15 @@ describe("billing page route", () => {
       subscription: { id: "gid://shopify/AppSubscription/1" },
     });
 
-    const response = await loader(args(new Request("https://search.pagelumo.com/app/billing/return")));
+    const response = await loader(
+      args(
+        new Request(
+          "https://search.pagelumo.com/app/billing/return?shop=demo.myshopify.com&host=encoded-host&embedded=1",
+        ),
+      ),
+    );
 
     expect(response.status).toBe(302);
-    expect(response.headers.get("location")).toBe("/app");
+    expect(response.headers.get("location")).toBe("/app?shop=demo.myshopify.com&host=encoded-host&embedded=1");
   });
 });

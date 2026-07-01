@@ -134,7 +134,8 @@ describe("LensCart AI theme extension contract", () => {
     const js = readExtensionFile("assets/lens-cart-ai-storefront.js");
 
     expect(js).toContain("function errorMessageFromResponse(response, body, fallback)");
-    expect(js).toContain('if (response.status === 402) return body.error || "Lens Search is not active for this store.";');
+    expect(js).toContain('if (response.status === 402) return body.error || "Lens Search billing is not active for this store.";');
+    expect(js).toContain('"billing_inactive"');
     expect(js).toContain("function responseErrorFromResponse(response, body, fallback)");
     expect(js).toContain("error.status = response.status;");
     expect(js).toContain('if (!response.ok) throw responseErrorFromResponse(response, body, "Something went wrong. Please try again.");');

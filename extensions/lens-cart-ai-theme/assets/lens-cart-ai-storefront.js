@@ -132,7 +132,10 @@
   }
 
   function errorMessageFromResponse(response, body, fallback) {
-    if (response.status === 402) return body.error || "Lens Search is not active for this store.";
+    if (response.status === 402 && body.reason === "billing_inactive") {
+      return body.error || "Lens Search billing is not active for this store.";
+    }
+    if (response.status === 402) return body.error || "Lens Search billing is not active for this store.";
     return body.error || fallback;
   }
 

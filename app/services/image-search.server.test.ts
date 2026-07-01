@@ -72,6 +72,21 @@ describe("filterHitsByDominantProductCategory", () => {
       { vectorId: "v3", shopifyProductGid: "coat", shopifyMediaGid: "m3", score: 0.72 },
     ]);
   });
+
+  it("keeps highest scoring products when the top hit has no inferred category", () => {
+    const hits = [
+      { vectorId: "v1", shopifyProductGid: "tank", shopifyMediaGid: "m1", score: 0.99 },
+      { vectorId: "v2", shopifyProductGid: "leggings", shopifyMediaGid: "m2", score: 0.79 },
+      { vectorId: "v3", shopifyProductGid: "tumbler", shopifyMediaGid: "m3", score: 0.58 },
+    ];
+    const products = new Map([
+      ["tank", { title: "Athletic Tank", productType: "", tags: [] }],
+      ["leggings", { title: "Athletic Leggings Unisex", productType: "Leggings", tags: [] }],
+      ["tumbler", { title: "Gym Strong Tumbler", productType: "drinkware", tags: [] }],
+    ]);
+
+    expect(filterHitsByDominantProductCategory(hits, products)).toEqual(hits);
+  });
 });
 
 describe("buildProductSearchResults", () => {

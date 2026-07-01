@@ -320,8 +320,9 @@ function billingUnavailableHtml(): string {
   <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Lens Search unavailable</title></head>
   <body style="font-family: system-ui, sans-serif; margin: 0; padding: 40px; color: #111827; background: #f8fafc;">
     <main style="max-width: 720px; margin: 0 auto; background: white; border: 1px solid #e5e7eb; border-radius: 16px; padding: 28px;">
-      <h1>Lens Search is not active</h1>
-      <p>Lens Search is not active for this store. Please contact the store owner.</p>
+      <h1>Lens Search billing is not active</h1>
+      <p>Lens Search billing is not active for this store. Please contact the store owner.</p>
+      <p>The storefront embed may still be loaded; billing/API access is blocked.</p>
       <a href="/collections/all">Continue shopping</a>
     </main>
   </body>

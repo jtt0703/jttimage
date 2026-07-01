@@ -73,8 +73,9 @@ describe("similar products route", () => {
 
     expect(response.status).toBe(402);
     await expect(response.json()).resolves.toEqual({
-      error: "Lens Search is not active for this store.",
+      error: "Lens Search billing is not active for this store.",
       code: "billing_required",
+      reason: "billing_inactive",
       plan: "Starter",
     });
     expect(mocks.getSimilarProducts).not.toHaveBeenCalled();

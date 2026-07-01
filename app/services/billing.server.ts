@@ -1,7 +1,7 @@
 import type { PrismaClient, ShopBillingState } from "@prisma/client";
 import { getBillingPlanConfig, type BillingPlanConfig } from "./billing-plan.server";
 
-export const BILLING_REQUIRED_MESSAGE = "Lens Search is not active for this store.";
+export const BILLING_REQUIRED_MESSAGE = "Lens Search billing is not active for this store.";
 
 export type ShopifySubscription = {
   id: string;
@@ -20,6 +20,7 @@ type AdminGraphqlClient = {
 export class BillingAccessError extends Error {
   status = 402;
   code = "billing_required";
+  reason = "billing_inactive";
   plan = getBillingPlanConfig().planName;
 
   constructor(message = BILLING_REQUIRED_MESSAGE) {
@@ -31,6 +32,7 @@ export class BillingAccessError extends Error {
     return {
       error: this.message,
       code: this.code,
+      reason: this.reason,
       plan: this.plan,
     };
   }
@@ -55,15 +57,11 @@ function addDays(date: Date, days: number): Date {
 
 export function selectActiveSubscription(
   subscriptions: ShopifySubscription[],
-  plan: Pick<BillingPlanConfig, "planName" | "isTest">,
+  plan: Pick<BillingPlanConfig, "planName">,
 ): ShopifySubscription | null {
   return (
     subscriptions.find((subscription) => {
-      return (
-        subscription.name === plan.planName &&
-        subscription.status === "ACTIVE" &&
-        (plan.isTest || !subscription.test)
-      );
+      return subscription.name === plan.planName && subscription.status === "ACTIVE";
     }) ?? null
   );
 }
@@ -100,9 +98,15 @@ export function isBillingStateFresh(input: { lastCheckedAt: Date | null; now: Da
   return input.now.getTime() - input.lastCheckedAt.getTime() <= input.cacheSeconds * 1000;
 }
 
-export function buildBillingReturnUrl(request: Request): string {
+export function buildBillingReturnUrl(request: Request, shopDomain: string): string {
   const baseUrl = process.env.SHOPIFY_APP_URL || new URL(request.url).origin;
-  return new URL("/app/billing/return", baseUrl).toString();
+  const requestUrl = new URL(request.url);
+  const returnUrl = new URL("/app/billing/return", baseUrl);
+  returnUrl.searchParams.set("shop", shopDomain);
+  const host = requestUrl.searchParams.get("host");
+  if (host) returnUrl.searchParams.set("host", host);
+  returnUrl.searchParams.set("embedded", requestUrl.searchParams.get("embedded") || "1");
+  return returnUrl.toString();
 }
 
 export function buildSubscriptionCreateVariables(input: {
@@ -250,7 +254,7 @@ export async function getCachedBillingEntitlement(input: {
     now,
     cacheSeconds: plan.entitlementCacheSeconds,
   });
-  return { entitled: Boolean(state && fresh && state.subscriptionStatus === "active"), state, fresh };
+  return { entitled: Boolean(state && state.subscriptionStatus === "active"), state, fresh };
 }
 
 export async function requireBillingAccess(input: {
@@ -258,6 +262,7 @@ export async function requireBillingAccess(input: {
   shopDomain: string;
   admin?: AdminGraphqlClient;
   plan?: BillingPlanConfig;
+  now?: Date;
 }): Promise<ShopBillingState> {
   const plan = input.plan ?? getBillingPlanConfig();
   if (input.admin) {
@@ -266,12 +271,18 @@ export async function requireBillingAccess(input: {
       admin: input.admin,
       shopDomain: input.shopDomain,
       plan,
+      now: input.now,
     });
     if (!refreshed.entitled) throw new BillingAccessError();
     return refreshed.state;
   }
 
-  const cached = await getCachedBillingEntitlement({ prisma: input.prisma, shopDomain: input.shopDomain, plan });
+  const cached = await getCachedBillingEntitlement({
+    prisma: input.prisma,
+    shopDomain: input.shopDomain,
+    plan,
+    now: input.now,
+  });
   if (!cached.entitled || !cached.state) throw new BillingAccessError();
   return cached.state;
 }
@@ -287,7 +298,7 @@ export async function createSubscription(input: {
   const state = await getOrCreateBillingState({ prisma: input.prisma, shopDomain: input.shopDomain, plan });
   const variables = buildSubscriptionCreateVariables({
     plan,
-    returnUrl: buildBillingReturnUrl(input.request),
+    returnUrl: buildBillingReturnUrl(input.request, input.shopDomain),
     trialUsed: state.trialUsed,
   });
   const response = await input.admin.graphql(APP_SUBSCRIPTION_CREATE_MUTATION, { variables });

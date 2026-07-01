@@ -16,8 +16,9 @@ type IndexJobActionResult = {
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
+  let billingState: Awaited<ReturnType<typeof requireBillingAccess>>;
   try {
-    await requireBillingAccess({ prisma, admin, shopDomain: session.shop });
+    billingState = await requireBillingAccess({ prisma, admin, shopDomain: session.shop });
   } catch (error) {
     if (error instanceof BillingAccessError) throw redirect(redirectWithCurrentSearch(request, "/app/billing"));
     throw error;
@@ -33,11 +34,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.shopProductImage.count({ where: { shopDomain: session.shop, embeddingStatus: "pending" } }),
   ]);
 
-  return { indexedImages, lastJob, pendingImages, totalImages };
+  return {
+    billing: {
+      lastCheckedAt: billingState.lastCheckedAt,
+      status: billingState.subscriptionStatus,
+    },
+    indexedImages,
+    lastJob,
+    pendingImages,
+    totalImages,
+  };
 };
 
 export default function Index() {
-  const { indexedImages, lastJob, pendingImages, totalImages } = useLoaderData<typeof loader>();
+  const { billing, indexedImages, lastJob, pendingImages, totalImages } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
   const shopify = useAppBridge();
   const isLoading = ["loading", "submitting"].includes(fetcher.state);
@@ -65,6 +75,8 @@ export default function Index() {
 
   const currentJob = lastJob;
   const currentJobIsProcessing = currentJob?.status === "queued" || currentJob?.status === "running";
+  const storefrontBillingStatus =
+    billing.status === "active" ? "Storefront API billing: Active" : "Storefront API billing: Inactive";
 
   return (
     <s-page heading="LensCart AI Overview">
@@ -102,11 +114,15 @@ export default function Index() {
       ) : null}
 
       <s-section heading="Storefront readiness">
-        <s-paragraph>
-          The storefront image search widget is configured in the Shopify theme editor. Use Settings to review the app
-          embed options before taking App Store screenshots.
-        </s-paragraph>
-        <s-link href="/app/settings">Review storefront settings</s-link>
+        <s-stack direction="block" gap="small">
+          <s-paragraph>{storefrontBillingStatus}</s-paragraph>
+          {billing.lastCheckedAt ? (
+            <s-paragraph>Billing checked at: {new Date(billing.lastCheckedAt).toLocaleString()}</s-paragraph>
+          ) : null}
+          <s-paragraph>Camera button visible means the Theme App Embed is loaded.</s-paragraph>
+          <s-paragraph>A 402 response means billing/API access is inactive, not that the embed is missing.</s-paragraph>
+          <s-link href="/app/settings">Review storefront settings</s-link>
+        </s-stack>
       </s-section>
 
       <s-section heading="Last index job">
