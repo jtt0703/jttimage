@@ -10,6 +10,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // Webhook requests can trigger multiple times and after an app has already been uninstalled.
   // If this webhook already ran, the session may have been deleted previously.
   if (session) {
+    // Keep ShopBillingState on uninstall so reinstalling the app does not grant another free trial.
     await db.session.deleteMany({ where: { shop } });
   }
 

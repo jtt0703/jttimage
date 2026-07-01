@@ -33,6 +33,8 @@ describe("LensCart AI theme extension contract", () => {
   it("defines the image search app embed hooks and settings", () => {
     const liquid = readExtensionFile("blocks/image-search-app-embed.liquid");
 
+    expect(liquid).toContain('"name": "Lens Search"');
+    expect(liquid).not.toContain('"name": "LensCart AI Image Search"');
     expect(liquid).toContain('"target": "body"');
     expect(liquid).toContain('data-shop-domain="{{ shop.permanent_domain | escape }}"');
     expect(liquid).toContain('data-api-base-url="{{ block.settings.api_base_url | escape }}"');
@@ -126,6 +128,23 @@ describe("LensCart AI theme extension contract", () => {
     expect(js).toContain("favoriteProductsFromCache(shop)");
     expect(js).toContain('setModalStatus(products.length ? "Showing saved products." : "No saved products yet.")');
     expect(js).toContain('setWishlistStatus(products.length ? "" : "No saved products yet.")');
+  });
+
+  it("shows friendly storefront messages for billing 402 responses", () => {
+    const js = readExtensionFile("assets/lens-cart-ai-storefront.js");
+
+    expect(js).toContain("function errorMessageFromResponse(response, body, fallback)");
+    expect(js).toContain('if (response.status === 402) return body.error || "Lens Search billing is not active for this store.";');
+    expect(js).toContain('"billing_inactive"');
+    expect(js).toContain("function responseErrorFromResponse(response, body, fallback)");
+    expect(js).toContain("error.status = response.status;");
+    expect(js).toContain('if (!response.ok) throw responseErrorFromResponse(response, body, "Something went wrong. Please try again.");');
+    expect(js).toContain('if (!response.ok) throw responseErrorFromResponse(response, body, "Similar products unavailable.");');
+    expect(js).toContain('if (!response.ok) throw responseErrorFromResponse(response, body, "Wishlist unavailable.");');
+    expect(js).toContain("if (error && error.status === 402) throw error;");
+    expect(js).toContain('setModalStatus(error && error.message ? error.message : "Wishlist unavailable.");');
+    expect(js).toContain('setWishlistStatus(error && error.message ? error.message : "No saved products yet.");');
+    expect(js).not.toContain("throw new Error(body.error ||");
   });
 
   it("loads local upload thumbnails through the storefront app proxy", () => {

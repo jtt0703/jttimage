@@ -8,6 +8,8 @@ import {
   verifyShopifyProxySignature,
 } from "../lib/image-search/validation.server";
 import { errorLogFields, logger } from "../lib/logger.server";
+import { storefrontCorsPreflight, withStorefrontCors } from "../lib/storefront-cors.server";
+import { billingAccessErrorResponse, requireBillingAccess } from "../services/billing.server";
 import { EmbeddingServiceTimeoutError, EmbeddingServiceUnavailableError } from "../services/embedding-client.server";
 import { runImageSearch } from "../services/image-search.server";
 import { MilvusUnavailableError } from "../services/milvus-client.server";
@@ -36,6 +38,7 @@ async function withTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise
 function errorStatus(error: unknown): number {
   if (error instanceof ImageSearchTimeoutError || error instanceof EmbeddingServiceTimeoutError) return 504;
   if (error instanceof EmbeddingServiceUnavailableError || error instanceof MilvusUnavailableError) return 503;
+  if (error instanceof Error && error.message.startsWith("Invalid shop domain")) return 400;
   if (error instanceof Error && error.message.startsWith("Please upload")) return 400;
   if (error instanceof Error && error.message.startsWith("Image is too large")) return 400;
   return 500;
@@ -48,6 +51,9 @@ function publicErrorMessage(error: unknown): string {
   if (error instanceof EmbeddingServiceUnavailableError || error instanceof MilvusUnavailableError) {
     return "Image search is temporarily unavailable. Please try again later.";
   }
+  if (error instanceof Error && error.message.startsWith("Invalid shop domain")) {
+    return error.message;
+  }
   if (error instanceof Error && (error.message.startsWith("Please upload") || error.message.startsWith("Image is too large"))) {
     return error.message;
   }
@@ -55,29 +61,40 @@ function publicErrorMessage(error: unknown): string {
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
+  if (request.method === "OPTIONS") return storefrontCorsPreflight(request);
+
   const requestStartedAtMs = performance.now();
   const url = new URL(request.url);
-  const uploadParseStartedAtMs = performance.now();
-  const formData = await request.formData();
-  const uploadParseMs = performance.now() - uploadParseStartedAtMs;
-  const shopDomain = validateShopDomain(String(formData.get("shop") ?? url.searchParams.get("shop") ?? ""));
-
-  if (process.env.NODE_ENV === "production" && !verifyShopifyProxySignature(url, process.env.SHOPIFY_API_SECRET ?? "")) {
-    return Response.json({ error: "Invalid app proxy signature" }, { status: 401 });
-  }
-
-  const installedSession = await prisma.session.findFirst({ where: { shop: shopDomain } });
-  if (!installedSession) {
-    return Response.json({ error: "Shop is not installed" }, { status: 403 });
-  }
-
-  const file = formData.get("image");
-  if (!(file instanceof File)) {
-    return Response.json({ error: "Image file is required" }, { status: 400 });
-  }
-
-  const config = getImageSearchConfig();
+  let shopDomain = "unknown";
   try {
+    const uploadParseStartedAtMs = performance.now();
+    const formData = await request.formData();
+    const uploadParseMs = performance.now() - uploadParseStartedAtMs;
+    shopDomain = validateShopDomain(String(formData.get("shop") ?? url.searchParams.get("shop") ?? ""));
+
+    if (process.env.NODE_ENV === "production" && !verifyShopifyProxySignature(url, process.env.SHOPIFY_API_SECRET ?? "")) {
+      return withStorefrontCors(request, Response.json({ error: "Invalid app proxy signature" }, { status: 401 }));
+    }
+
+    const installedSession = await prisma.session.findFirst({ where: { shop: shopDomain } });
+    if (!installedSession) {
+      return withStorefrontCors(request, Response.json({ error: "Shop is not installed" }, { status: 403 }));
+    }
+
+    try {
+      await requireBillingAccess({ prisma, shopDomain });
+    } catch (error) {
+      const billingResponse = billingAccessErrorResponse(error);
+      if (billingResponse) return withStorefrontCors(request, billingResponse);
+      throw error;
+    }
+
+    const file = formData.get("image");
+    if (!(file instanceof File)) {
+      return withStorefrontCors(request, Response.json({ error: "Image file is required" }, { status: 400 }));
+    }
+
+    const config = getImageSearchConfig();
     const result = await withTimeout(
       runImageSearch({
         prisma,
@@ -94,7 +111,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }),
       config.imageSearchSyncTimeoutMs,
     );
-    return Response.json(result);
+    return withStorefrontCors(request, Response.json(result));
   } catch (error) {
     const status = errorStatus(error);
     logger.error(
@@ -106,6 +123,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
       "image search route failed",
     );
-    return Response.json({ error: publicErrorMessage(error) }, { status });
+    return withStorefrontCors(request, Response.json({ error: publicErrorMessage(error) }, { status }));
   }
 };

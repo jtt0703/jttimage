@@ -131,13 +131,9 @@ export function filterHitsByDominantProductCategory(
   productsByGid: Map<string, ProductCategoryInput>,
   anchorProduct?: ProductCategoryInput | null,
 ): MilvusSearchHit[] {
-  const anchorCategory =
-    (anchorProduct ? inferProductSearchCategory(anchorProduct) : null) ??
-    hits
-      .map((hit) => productsByGid.get(hit.shopifyProductGid))
-      .filter((product): product is ProductCategoryInput => Boolean(product))
-      .map(inferProductSearchCategory)
-      .find((category): category is string => Boolean(category));
+  const topHitProduct = hits[0] ? productsByGid.get(hits[0].shopifyProductGid) : null;
+  const categoryAnchor = anchorProduct ?? topHitProduct;
+  const anchorCategory = categoryAnchor ? inferProductSearchCategory(categoryAnchor) : null;
 
   if (!anchorCategory) return hits;
 

@@ -5,10 +5,10 @@ import { loader } from "./routes/api.storage.uploads.$";
 
 const uploadRoot = "storage/test-api-uploads-route";
 
-function loaderArgs(requestUrl: string, storageKey: string) {
+function loaderArgs(requestUrl: string, storageKey: string, init?: RequestInit) {
   const url = new URL(requestUrl);
   return {
-    request: new Request(url),
+    request: new Request(url, init),
     url,
     pattern: "/api/storage/uploads/*",
     params: { "*": storageKey },
@@ -44,5 +44,23 @@ describe("api storage uploads route", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("image/webp");
     expect(await response.text()).toBe("webp-bytes");
+  });
+
+  it("allows configured storefront origins when serving uploaded thumbnails", async () => {
+    vi.stubEnv("STOREFRONT_CORS_ORIGINS", "https://test-klaehgez.myshopify.com");
+    await writeFile(
+      path.join(process.cwd(), uploadRoot, "demo-shop.myshopify.com", "upload-1", "thumbnail.webp"),
+      Buffer.from("webp-bytes"),
+    );
+
+    const response = await loader(
+      loaderArgs(
+        "http://localhost/api/storage/uploads/demo-shop.myshopify.com/upload-1/thumbnail.webp",
+        "demo-shop.myshopify.com/upload-1/thumbnail.webp",
+        { headers: { Origin: "https://test-klaehgez.myshopify.com" } },
+      ),
+    );
+
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://test-klaehgez.myshopify.com");
   });
 });

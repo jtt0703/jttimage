@@ -1,11 +1,12 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { getImageSearchConfig } from "../lib/image-search/env.server";
 import { errorLogFields, logger } from "../lib/logger.server";
+import { withStorefrontCors } from "../lib/storefront-cors.server";
 import { createUploadStorage } from "../services/upload-storage.server";
 
-export const loader = async ({ params }: LoaderFunctionArgs) => {
+export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const storageKey = params["*"];
-  if (!storageKey) return new Response("Not found", { status: 404 });
+  if (!storageKey) return withStorefrontCors(request, new Response("Not found", { status: 404 }));
 
   const config = getImageSearchConfig();
   const uploadStorage = createUploadStorage(config);
@@ -20,14 +21,17 @@ export const loader = async ({ params }: LoaderFunctionArgs) => {
 
   try {
     const object = await uploadStorage.getObject(storageKey);
-    if (!object) return new Response("Not found", { status: 404 });
+    if (!object) return withStorefrontCors(request, new Response("Not found", { status: 404 }));
 
-    return new Response(new Uint8Array(object.body), {
-      headers: {
-        "Cache-Control": "public, max-age=31536000, immutable",
-        "Content-Type": object.contentType,
-      },
-    });
+    return withStorefrontCors(
+      request,
+      new Response(new Uint8Array(object.body), {
+        headers: {
+          "Cache-Control": "public, max-age=31536000, immutable",
+          "Content-Type": object.contentType,
+        },
+      }),
+    );
   } catch (error) {
     logger.warn(
       {
@@ -38,6 +42,6 @@ export const loader = async ({ params }: LoaderFunctionArgs) => {
       },
       "failed to read upload object",
     );
-    return new Response("Not found", { status: 404 });
+    return withStorefrontCors(request, new Response("Not found", { status: 404 }));
   }
 };

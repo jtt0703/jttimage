@@ -1,5 +1,7 @@
 import type { LoaderFunctionArgs } from "react-router";
+import prisma from "../db.server";
 import { validateShopDomain, verifyShopifyProxySignature } from "../lib/image-search/validation.server";
+import { BillingAccessError, requireBillingAccess } from "../services/billing.server";
 
 function escapeHtml(value: string): string {
   return value
@@ -312,6 +314,21 @@ function wishlistHtml(input: { shopDomain: string; customerGid: string; apiBaseU
 </html>`;
 }
 
+function billingUnavailableHtml(): string {
+  return `<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Lens Search unavailable</title></head>
+  <body style="font-family: system-ui, sans-serif; margin: 0; padding: 40px; color: #111827; background: #f8fafc;">
+    <main style="max-width: 720px; margin: 0 auto; background: white; border: 1px solid #e5e7eb; border-radius: 16px; padding: 28px;">
+      <h1>Lens Search billing is not active</h1>
+      <p>Lens Search billing is not active for this store. Please contact the store owner.</p>
+      <p>The storefront embed may still be loaded; billing/API access is blocked.</p>
+      <a href="/collections/all">Continue shopping</a>
+    </main>
+  </body>
+</html>`;
+}
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   if (process.env.NODE_ENV === "production" && !verifyShopifyProxySignature(url, process.env.SHOPIFY_API_SECRET ?? "")) {
@@ -323,6 +340,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     shopDomain = validateShopDomain(url.searchParams.get("shop"));
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Invalid wishlist request" }, { status: 400 });
+  }
+
+  const installedSession = await prisma.session.findFirst({ where: { shop: shopDomain } });
+  if (!installedSession) return Response.json({ error: "Shop is not installed" }, { status: 403 });
+
+  try {
+    await requireBillingAccess({ prisma, shopDomain });
+  } catch (error) {
+    if (error instanceof BillingAccessError) {
+      return new Response(billingUnavailableHtml(), {
+        status: 402,
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      });
+    }
+    throw error;
   }
 
   const apiBaseUrl = url.searchParams.get("path_prefix") || "/apps/lens-cart-ai";

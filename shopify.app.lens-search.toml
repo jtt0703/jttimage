@@ -1,37 +1,17 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = "37873a4d1c3e006a36a7001f1a50d3bc"
-application_url = "https://example.com"
+client_id = "6d25e60dbb06b6811c827e94c88add91"
+name = "Lens Search"
+application_url = "https://search.pagelumo.com"
 embedded = true
-name = "LensCart AI"
 
 [access_scopes]
-# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "write_products,write_metaobjects,write_metaobject_definitions,write_app_proxy"
+optional_scopes = [ ]
+use_legacy_install_flow = false
 
-[product.metafields.app.demo_info]
-type = "single_line_text_field"
-name = "Demo Source Info"
-description = "Tracks products created by the Shopify app template for development"
-
-  [product.metafields.app.demo_info.access]
-  admin = "merchant_read_write"
-
-[metaobjects.app.example]
-name = "Example"
-description = "An example metaobject definition created by this template"
-
-  [metaobjects.app.example.access]
-  admin = "merchant_read_write"
-
-[metaobjects.app.example.fields.title]
-name = "Title"
-type = "single_line_text_field"
-required = true
-
-[metaobjects.app.example.fields.description]
-name = "Description"
-type = "multi_line_text_field"
+[auth]
+redirect_urls = [ "https://search.pagelumo.com/auth/callback" ]
 
 [webhooks]
 api_version = "2026-07"
@@ -49,6 +29,18 @@ api_version = "2026-07"
   topics = [ "app_subscriptions/update" ]
 
   [[webhooks.subscriptions]]
+  uri = "/webhooks/customers/data_request"
+  compliance_topics = [ "customers/data_request" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/customers/redact"
+  compliance_topics = [ "customers/redact" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/shop/redact"
+  compliance_topics = [ "shop/redact" ]
+
+  [[webhooks.subscriptions]]
   uri = "/webhooks/products/create"
   topics = [ "products/create" ]
 
@@ -60,14 +52,10 @@ api_version = "2026-07"
   uri = "/webhooks/products/delete"
   topics = [ "products/delete" ]
 
-[auth]
-redirect_urls = [ "https://example.com/api/auth" ]
-
 [app_proxy]
 url = "/api"
 prefix = "apps"
 subpath = "lens-cart-ai"
 
 [build]
-include_config_on_deploy = true
 automatically_update_urls_on_dev = true
